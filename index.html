@@ -21,11 +21,11 @@
         富友開發說明會快速報到系統
     </h1>
 
-    <!-- 檔案上載提示區（置中設計） -->
+    <!-- 檔案上載提示區（完美置中） -->
     <div id="file-upload-container" class="w-full max-w-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border border-amber-200 dark:border-amber-900/50 p-5 rounded-2xl mb-4 shadow-lg shadow-amber-500/5 text-center flex flex-col items-center justify-center">
-        <p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-3">請先上傳您的檔案以開始使用：</p>
+        <p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-3 text-center w-full">請先上傳您的檔案以開始使用：</p>
         <div class="flex justify-center w-full">
-            <input type="file" id="excel-file-input" accept=".xlsx" class="text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer transition shadow-sm">
+            <input type="file" id="excel-file-input" accept=".xlsx" class="text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer transition shadow-sm mx-auto block">
         </div>
     </div>
 
@@ -50,16 +50,16 @@
         </div>
     </div>
 
-    <!-- 輸入與按鈕操作區 -->
-    <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
-        <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-3">
-            掃描條碼或手動輸入編號/姓名後點擊執行，或按 Enter
+    <!-- 輸入與按鈕操作區（輸入框高度與佔比縮小） -->
+    <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
+        <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-2.5">
+            直接掃描，或輸入編號/姓名
         </p>
-        <div class="flex gap-2">
-            <input type="text" id="barcode-input" placeholder="等待掃描編號，或輸入編號/姓名…" autocomplete="off"
-                class="flex-1 h-14 px-4 text-lg md:text-xl font-mono text-center bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner">
-            <button id="execute-btn" class="h-14 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/25">
-                執行報到
+        <div class="flex gap-2 items-center justify-center">
+            <input type="text" id="barcode-input" placeholder="請輸入編號或姓名…" autocomplete="off"
+                class="w-48 sm:w-64 h-11 px-3 text-base font-mono text-center bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner">
+            <button id="execute-btn" class="h-11 px-5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-md text-sm md:text-base">
+                報到
             </button>
         </div>
     </div>
@@ -324,7 +324,6 @@
         `;
     }
 
-    // 相機控制邏輯
     toggleCameraBtn.onclick = () => {
         if (!isCameraRunning) {
             startCamera();
@@ -348,13 +347,10 @@
             { facingMode: "environment" },
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-                // 成功掃描到 QR Code
                 stopCamera();
                 checkinByCode(decodedText.trim());
             },
-            (errorMessage) => {
-                // 掃描中（忽略未對準時的錯誤訊息）
-            }
+            (errorMessage) => {}
         ).catch(err => {
             alert(`無法啟動相機鏡頭：\n${err}`);
             stopCamera();
