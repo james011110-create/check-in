@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>活動快速報到系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS Excel 處理 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- HTML5 QR Code 掃描器 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-200 dark:from-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col items-center p-4">
+
+    <!-- 頂部大標題 -->
+    <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight mt-4 mb-3 text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+        富友開發說明會快速報到系統
+    </h1>
+
+    <!-- 檔案上載提示區（置中設計） -->
+    <div id="file-upload-container" class="w-full max-w-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border border-amber-200 dark:border-amber-900/50 p-5 rounded-2xl mb-4 shadow-lg shadow-amber-500/5 text-center flex flex-col items-center justify-center">
+        <p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-3">請先上傳您的檔案以開始使用：</p>
+        <div class="flex justify-center w-full">
+            <input type="file" id="excel-file-input" accept=".xlsx" class="text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer transition shadow-sm">
+        </div>
+    </div>
+
+    <!-- 固定統計區塊 -->
+    <div class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-blue-100 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-xl shadow-blue-500/5 text-center">
+        <div id="stats-label" class="text-2xl md:text-3xl font-black text-blue-900 dark:text-blue-300 tracking-wide">
+            已報到人數：0 / 0
+        </div>
+    </div>
+
+    <!-- 相機掃描控制按鈕區 -->
+    <div id="camera-control-container" class="w-full max-w-xl mb-4" style="display:none;">
+        <button id="toggle-camera-btn" class="w-full h-14 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold rounded-2xl transition shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 text-lg">
+            📷 <span>開啟相機掃描 QR Code</span>
+        </button>
+        <!-- 相機即時預覽框 (預設隱藏) -->
+        <div id="reader-container" class="w-full bg-black rounded-2xl overflow-hidden mt-3 shadow-inner hidden relative">
+            <div id="reader"></div>
+            <button id="close-camera-btn" class="absolute top-3 right-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md z-10">
+                關閉鏡頭
+            </button>
+        </div>
+    </div>
+
+    <!-- 輸入與按鈕操作區 -->
+    <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
+        <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-3">
+            掃描條碼或手動輸入編號/姓名後點擊執行，或按 Enter
+        </p>
+        <div class="flex gap-2">
+            <input type="text" id="barcode-input" placeholder="等待掃描編號，或輸入編號/姓名…" autocomplete="off"
+                class="flex-1 h-14 px-4 text-lg md:text-xl font-mono text-center bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner">
+            <button id="execute-btn" class="h-14 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/25">
+                執行報到
+            </button>
+        </div>
+    </div>
+
+    <!-- 功能列 -->
+    <div id="toolbar-frame" class="w-full max-w-xl flex gap-3 mb-4">
+        <button id="view-absent-btn" class="flex-1 h-12 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/80 text-rose-600 dark:text-rose-400 font-bold rounded-xl transition shadow-sm border border-sky-200/60 dark:border-sky-900">
+            查看未報到清單
+        </button>
+        <button id="download-btn" class="h-12 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/20" style="display:none;">
+            下載最新報到表
+        </button>
+    </div>
+
+    <!-- 狀態顯示與結果區塊 -->
+    <div id="status-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-6 mb-4 shadow-xl shadow-slate-200 dark:shadow-none text-center flex flex-col items-center justify-center min-h-[220px] transition-all border border-slate-200/80 dark:border-slate-700">
+        <div id="status-title" class="text-2xl md:text-3xl font-extrabold mb-3 text-slate-700 dark:text-slate-200">
+            等待掃描或輸入…
+        </div>
+        <div id="info-label" class="text-lg md:text-xl text-slate-600 dark:text-slate-300 whitespace-pre-line leading-relaxed">
+            請上傳 Excel 檔並進行報到作業
+        </div>
+        <div id="smiley-container" class="mt-4"></div>
+    </div>
+
+    <!-- 姓名候選清單畫面 -->
+    <div id="candidates-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 mb-4 shadow-xl max-h-[380px] overflow-y-auto border border-slate-200 dark:border-slate-700" style="display:none;">
+        <div id="candidates-title" class="font-bold text-center mb-3 text-slate-700 dark:text-slate-200"></div>
+        <div id="candidates-list" class="flex flex-col gap-2"></div>
+        <button id="cancel-search-btn" class="w-full mt-3 h-12 bg-slate-500 hover:bg-slate-600 text-white rounded-xl font-bold transition">
+            取消，重新輸入
+        </button>
+    </div>
+
+    <!-- 未報到清單畫面 -->
+    <div id="absent-view-container" class="w-full max-w-xl flex flex-col flex-1" style="display:none;">
+        <button id="back-to-checkin-btn" class="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mb-4 shadow-lg shadow-blue-600/25 transition">
+            返回報到系統
+        </button>
+        <div class="w-full bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 flex-1 shadow-xl max-h-[500px] overflow-y-auto border border-slate-200 dark:border-slate-700">
+            <div id="absent-count-label" class="text-xl font-bold text-center mb-4 text-slate-700 dark:text-slate-200"></div>
+            <div id="absent-list-content" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-center"></div>
+        </div>
+    </div>
+
+<script>
+    let workbook = null;
+    let excelData = [];
+    let totalCount = 0;
+    let checkedInCount = 0;
+    let html5QrCode = null;
+    let isCameraRunning = false;
+
+    const fileInput = document.getElementById('excel-file-input');
+    const barcodeInput = document.getElementById('barcode-input');
+    const executeBtn = document.getElementById('execute-btn');
+    const statsLabel = document.getElementById('stats-label');
+    const statusFrame = document.getElementById('status-frame');
+    const statusTitle = document.getElementById('status-title');
+    const infoLabel = document.getElementById('info-label');
+    const smileyContainer = document.getElementById('smiley-container');
+    const downloadBtn = document.getElementById('download-btn');
+    const cameraControlContainer = document.getElementById('camera-control-container');
+    const toggleCameraBtn = document.getElementById('toggle-camera-btn');
+    const readerContainer = document.getElementById('reader-container');
+    const closeCameraBtn = document.getElementById('close-camera-btn');
+    
+    const viewAbsentBtn = document.getElementById('view-absent-btn');
+    const backToCheckinBtn = document.getElementById('back-to-checkin-btn');
+    const absentViewContainer = document.getElementById('absent-view-container');
+    const inputFrame = document.getElementById('input-frame');
+    const toolbarFrame = document.getElementById('toolbar-frame');
+    const absentCountLabel = document.getElementById('absent-count-label');
+    const absentListContent = document.getElementById('absent-list-content');
+
+    const candidatesFrame = document.getElementById('candidates-frame');
+    const candidatesTitle = document.getElementById('candidates-title');
+    const candidatesList = document.getElementById('candidates-list');
+    const cancelSearchBtn = document.getElementById('cancel-search-btn');
+
+    const THEMES = {
+        success: { bg: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900', titleColor: 'text-emerald-700 dark:text-emerald-300' },
+        duplicate: { bg: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900', titleColor: 'text-amber-700 dark:text-amber-300' },
+        error: { bg: 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900', titleColor: 'text-rose-700 dark:text-rose-300' },
+        neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
+    };
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = new Uint8Array(event.target.result);
+                workbook = XLSX.read(data, { type: 'array' });
+                parseExcelData();
+                downloadBtn.style.display = 'block';
+                cameraControlContainer.style.display = 'block';
+                showStatus("✅ 檔案載入成功", `已成功載入報到名單，總計 ${totalCount} 位貴賓。\n您可以開始進行報到作業。`, 'success');
+            } catch (err) {
+                showStatus("❌ 載入失敗", `讀取 Excel 檔案發生錯誤：\n${err.message}`, 'error');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    function parseExcelData() {
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        excelData = json;
+        totalCount = 0;
+        checkedInCount = 0;
+
+        for (let i = 1; i < json.length; i++) {
+            let row = json[i];
+            if (!row || row[0] === undefined || String(row[0]).trim() === "") continue;
+            totalCount++;
+            if (row[2]) checkedInCount++;
+        }
+        updateStatsDisplay();
+    }
+
+    function updateStatsDisplay() {
+        statsLabel.innerText = `已報到人數：${checkedInCount} / ${totalCount}`;
+    }
+
+    function handleExecute() {
+        if (!workbook) {
+            alert("請先上傳 Excel 報到檔案！");
+            return;
+        }
+        const text = barcodeInput.value.trim();
+        if (!text) return;
+
+        if (/^\d+$/.test(text)) {
+            checkinByCode(text);
+        } else {
+            searchByName(text);
+        }
+        barcodeInput.value = '';
+        barcodeInput.focus();
+    }
+
+    executeBtn.addEventListener('click', handleExecute);
+    barcodeInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleExecute();
+    });
+
+    function checkinByCode(code) {
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        let found = false;
+        let guestName = "";
+        let rowIndex = -1;
+
+        for (let i = 1; i < excelData.length; i++) {
+            let row = excelData[i];
+            if (row && row[0] !== undefined && String(row[0]).trim() === code) {
+                found = true;
+                guestName = row[1] || "";
+                rowIndex = i;
+                break;
+            }
+        }
+
+        if (found) {
+            let existingTime = excelData[rowIndex][2];
+            let now = new Date();
+            let currentTime = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0') + ' ' + 
+                String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0') + ':' + 
+                String(now.getSeconds()).padStart(2, '0');
+
+            if (existingTime) {
+                showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${guestName}\n\n原報到時間： ${existingTime}`, 'duplicate');
+            } else {
+                excelData[rowIndex][2] = currentTime;
+                worksheet[XLSX.utils.encode_cell({ r: rowIndex, c: 2 })] = { t: 's', v: currentTime };
+                
+                checkedInCount++;
+                updateStatsDisplay();
+
+                let remarkVal = excelData[rowIndex][3] || "";
+                let showSmileyFlag = String(remarkVal).includes("資");
+
+                showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${guestName}\n\n報到時間： ${currentTime}`, 'success');
+                if (showSmileyFlag) renderSmiley();
+            }
+        } else {
+            showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
+        }
+    }
+
+    function searchByName(keyword) {
+        let matches = [];
+        for (let i = 1; i < excelData.length; i++) {
+            let row = excelData[i];
+            if (row && row[1] && String(row[1]).includes(keyword)) {
+                let codeVal = String(row[0]).trim();
+                let nameVal = String(row[1]).trim();
+                let existingTime = row[2];
+                matches.push({ code: codeVal, name: nameVal, time: existingTime });
+            }
+        }
+
+        if (matches.length === 0) {
+            hideCandidates();
+            showStatus("❌ 查無此姓名", `找不到姓名包含「${keyword}」的貴賓，請重新確認！`, 'error');
+        } else {
+            showCandidates(keyword, matches);
+        }
+    }
+
+    function showCandidates(keyword, matches) {
+        statusFrame.style.display = 'none';
+        candidatesList.innerHTML = '';
+        candidatesTitle.innerText = `姓名包含「${keyword}」，共找到 ${matches.length} 筆，請點選正確的貴賓：`;
+
+        matches.forEach(m => {
+            let tag = m.time ? "（已報到）" : "";
+            let btn = document.createElement('button');
+            btn.className = `w-full py-3 px-4 rounded-xl font-bold text-lg text-white transition shadow-sm ${m.time ? 'bg-slate-500 hover:bg-slate-600' : 'bg-blue-600 hover:bg-blue-700'}`;
+            btn.innerText = `編號 ${m.code} 姓名 ${m.name}${tag}`;
+            btn.onclick = () => {
+                hideCandidates();
+                checkinByCode(m.code);
+            };
+            candidatesList.appendChild(btn);
+        });
+
+        candidatesFrame.style.display = 'block';
+    }
+
+    function hideCandidates() {
+        candidatesFrame.style.display = 'none';
+        statusFrame.style.display = 'flex';
+    }
+
+    cancelSearchBtn.onclick = hideCandidates;
+
+    function showStatus(title, info, type) {
+        smileyContainer.innerHTML = '';
+        statusFrame.className = `w-full max-w-xl rounded-2xl p-6 mb-4 shadow-xl text-center flex flex-col items-center justify-center min-h-[220px] transition-all border ${THEMES[type].bg}`;
+        statusTitle.className = `text-2xl md:text-3xl font-extrabold mb-3 ${THEMES[type].titleColor}`;
+        statusTitle.innerText = title;
+        infoLabel.innerText = info;
+    }
+
+    function renderSmiley() {
+        smileyContainer.innerHTML = `
+            <svg width="90" height="90" viewBox="0 0 140 140" class="mx-auto drop-shadow-md">
+                <circle cx="70" cy="70" r="60" fill="#FFD400" stroke="#E0A800" stroke-width="3"/>
+                <circle cx="52" cy="55" r="8" fill="black"/>
+                <circle cx="88" cy="55" r="8" fill="black"/>
+                <path d="M 40 75 Q 70 110 100 75" fill="none" stroke="black" stroke-width="6" stroke-linecap="round"/>
+            </svg>
+        `;
+    }
+
+    // 相機控制邏輯
+    toggleCameraBtn.onclick = () => {
+        if (!isCameraRunning) {
+            startCamera();
+        } else {
+            stopCamera();
+        }
+    };
+
+    closeCameraBtn.onclick = stopCamera;
+
+    function startCamera() {
+        readerContainer.classList.remove('hidden');
+        toggleCameraBtn.querySelector('span').innerText = "關閉相機鏡頭";
+        isCameraRunning = true;
+
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode("reader");
+        }
+
+        html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+                // 成功掃描到 QR Code
+                stopCamera();
+                checkinByCode(decodedText.trim());
+            },
+            (errorMessage) => {
+                // 掃描中（忽略未對準時的錯誤訊息）
+            }
+        ).catch(err => {
+            alert(`無法啟動相機鏡頭：\n${err}`);
+            stopCamera();
+        });
+    }
+
+    function stopCamera() {
+        if (html5QrCode && isCameraRunning) {
+            html5QrCode.stop().then(() => {
+                readerContainer.classList.add('hidden');
+                toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描 QR Code";
+                isCameraRunning = false;
+            }).catch(err => {
+                console.error("停止相機失敗", err);
+                readerContainer.classList.add('hidden');
+                isCameraRunning = false;
+            });
+        } else {
+            readerContainer.classList.add('hidden');
+            toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描 QR Code";
+            isCameraRunning = false;
+        }
+    }
+
+    viewAbsentBtn.onclick = () => {
+        if (!workbook) {
+            alert("請先上傳 Excel 報到檔案！");
+            return;
+        }
+        if (isCameraRunning) stopCamera();
+
+        inputFrame.style.display = 'none';
+        toolbarFrame.style.display = 'none';
+        statusFrame.style.display = 'none';
+        candidatesFrame.style.display = 'none';
+        cameraControlContainer.style.display = 'none';
+        absentViewContainer.style.display = 'flex';
+
+        loadAbsentList();
+    };
+
+    backToCheckinBtn.onclick = () => {
+        absentViewContainer.style.display = 'none';
+        inputFrame.style.display = 'block';
+        toolbarFrame.style.display = 'flex';
+        statusFrame.style.display = 'flex';
+        cameraControlContainer.style.display = 'block';
+        barcodeInput.focus();
+    };
+
+    function loadAbsentList() {
+        absentListContent.innerHTML = '';
+        let absentList = [];
+
+        for (let i = 1; i < excelData.length; i++) {
+            let row = excelData[i];
+            if (!row || row[0] === undefined || String(row[0]).trim() === "") continue;
+            if (!row[2]) {
+                absentList.push({ code: String(row[0]).trim(), name: row[1] ? String(row[1]).trim() : "" });
+            }
+        }
+
+        absentCountLabel.innerText = `尚未報到（共 ${absentList.length} 位）`;
+
+        if (absentList.length === 0) {
+            absentListContent.innerHTML = `<div class="col-span-full py-10 text-xl font-bold text-slate-500">所有貴賓皆已報到！</div>`;
+        } else {
+            absentList.forEach(item => {
+                let div = document.createElement('div');
+                div.className = "bg-slate-50 dark:bg-slate-900 p-3.5 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 text-xl md:text-2xl font-semibold tracking-wide";
+                div.innerText = `${item.code} ${item.name}`;
+                absentListContent.appendChild(div);
+            });
+        }
+    }
+
+    downloadBtn.onclick = () => {
+        if (!workbook) return;
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = XLSX.utils.aoa_to_sheet(excelData);
+        workbook.Sheets[firstSheetName] = worksheet;
+        XLSX.writeFile(workbook, "報到表_已更新.xlsx");
+    };
+</script>
+</body>
+</html>
