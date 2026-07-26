@@ -281,15 +281,38 @@
         });
     }
 
+    // ==================== 掃描排隊機制 ====================
+    // 目的：不管掃描/輸入速度多快（例如上一筆報到還沒收到雲端回應，就掃了下一筆），
+    // 都先進入隊列排隊，確保「一次只處理一筆」，處理完（不論成功或失敗）才自動接著處理下一筆，
+    // 這樣可以避免同一個分頁內，多筆請求同時送出造成的競爭問題，也不會遺失任何一筆掃描。
+    let isProcessing = false;
+    const scanQueue = [];
+
+    function enqueueScan(text) {
+        if (!text) return;
+        scanQueue.push(text);
+        processQueue();
+    }
+
+    async function processQueue() {
+        if (isProcessing) return;
+        if (scanQueue.length === 0) return;
+        isProcessing = true;
+        const text = scanQueue.shift();
+        if (/^\d+$/.test(text)) {
+            await checkinByCode(text);
+        } else {
+            await searchByName(text);
+        }
+        isProcessing = false;
+        processQueue();
+    }
+
     function handleExecute() {
         const text = scanBuffer.trim();
         if (!text) return;
 
-        if (/^\d+$/.test(text)) {
-            checkinByCode(text);
-        } else {
-            searchByName(text);
-        }
+        enqueueScan(text);
 
         scanBuffer = "";
         barcodeInput.value = "";
@@ -416,7 +439,7 @@
             },
             (decodedText) => {
                 stopCamera();
-                checkinByCode(decodedText.trim());
+                enqueueScan(decodedText.trim());
             },
             (errorMessage) => {}
         ).catch(err => {
