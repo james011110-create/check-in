@@ -102,6 +102,11 @@
     let html5QrCode = null;
     let isCameraRunning = false;
 
+    // 掃描槍/手動輸入的緩衝區，不依賴輸入框是否有焦點，
+    // 只要這個分頁是瀏覽器目前作用中的分頁，就能接收鍵盤輸入。
+    let scanBuffer = "";
+    let isAbsentView = false;
+
     const barcodeInput = document.getElementById('barcode-input');
     const executeBtn = document.getElementById('execute-btn');
     const statsLabel = document.getElementById('stats-label');
@@ -135,18 +140,19 @@
     };
 
     // ==================== 呼叫 GAS 共用函式 ====================
-    async function callGas(action, params = {}) {
+    // silent = true 時（例如背景定期輪詢），失敗不跳出錯誤訊息，避免干擾畫面，靜默略過即可。
+    async function callGas(action, params = {}, silent = false) {
         const query = new URLSearchParams({ action, ...params });
         try {
             const resp = await fetch(`${GAS_URL}?${query.toString()}`);
             const data = await resp.json();
             if (!data.ok) {
-                showStatus("❌ 雲端回應錯誤", data.error || "未知錯誤", 'error');
+                if (!silent) showStatus("❌ 雲端回應錯誤", data.error || "未知錯誤", 'error');
                 return null;
             }
             return data;
         } catch (err) {
-            showStatus("❌ 網路錯誤", `無法連線到雲端服務，請檢查網路連線後再試一次。\n${err.message}`, 'error');
+            if (!silent) showStatus("❌ 網路錯誤", `無法連線到雲端服務，請檢查網路連線後再試一次。\n${err.message}`, 'error');
             return null;
         }
     }
@@ -162,13 +168,96 @@
         updateStatsDisplay();
     }
 
+    // ==================== 定期自動輪詢，讓沒有在操作的裝置也能自動同步 ====================
+    // 例如筆電報到後，手機這邊不用手動整理，幾秒內畫面會自動更新最新人數。
+    // 注意：這是「每隔幾秒問一次雲端」，不是毫秒級即時推播，會有幾秒的些微延遲。
+    const STATS_POLL_INTERVAL_MS = 5000;
+
+    async function refreshStats() {
+        if (isAbsentView) return; // 在未報到清單畫面時，暫不干擾，避免畫面被打斷
+        const data = await callGas('stats', {}, true);
+        if (!data) return; // 輪詢失敗（例如網路暫時不穩）就靜默略過，下一輪再試
+        totalCount = data.total;
+        checkedInCount = data.checked_in;
+        updateStatsDisplay();
+    }
+
+    setInterval(refreshStats, STATS_POLL_INTERVAL_MS);
+
+    // 分頁從背景切回前景時（例如切去別的視窗又切回來），立刻刷新一次，
+    // 不用等到下一輪 5 秒輪詢，讓兩台裝置的同步感覺更即時。
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            refreshStats();
+        }
+    });
+
     function updateStatsDisplay() {
         statsLabel.innerText = `已報到人數：${checkedInCount} / ${totalCount}`;
     }
 
-    // ==================== 手動輸入 / Enter 觸發 ====================
+    // ==================== 全網頁鍵盤監聽（掃描槍 = 快速鍵盤輸入） ====================
+    // 綁在整個網頁（document）上，不論滑鼠點在畫面哪個位置，
+    // 只要這個分頁是目前作用中的分頁，就能接收掃描槍打出來的字元。
+    // 輸入框本身設為 readonly，只作為「目前輸入內容」的顯示用途。
+    barcodeInput.setAttribute('readonly', 'readonly');
+
+    // ==================== 自動維持輸入框焦點 ====================
+    // 目的：筆電使用實體/藍牙掃描槍時，掃描槍其實是用「模擬鍵盤輸入」的方式運作。
+    // 瀏覽器要能收到這些按鍵事件，頁面本身必須要有作用中的焦點（focus），
+    // 否則就算監聽器綁在 document 上也可能收不到。
+    // 以下機制讓輸入框「隨時自動保持在被選取狀態」，使用者完全不需要手動點擊，
+    // 掃描槍掃描後就能直接寫入 Google Sheet，跟手機相機掃描一樣「隨掃即用」。
+    function keepFocus() {
+        if (isAbsentView) return; // 在未報到清單畫面時不搶焦點，避免影響瀏覽
+        if (document.activeElement !== barcodeInput) {
+            barcodeInput.focus();
+        }
+    }
+
+    // 頁面載入完成，先聚焦一次
+    window.addEventListener('load', () => barcodeInput.focus());
+
+    // 輸入框一旦失去焦點，極短時間內自動搶回來
+    barcodeInput.addEventListener('blur', () => {
+        setTimeout(keepFocus, 50);
+    });
+
+    // 保險機制：每 0.3 秒檢查一次，確保長時間使用焦點不會悄悄跑掉
+    setInterval(keepFocus, 300);
+
+    // 使用者點擊畫面空白處時，也自動把焦點帶回輸入框
+    // （但點擊按鈕、候選清單等互動元件時不搶，避免影響原本的點擊功能）
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
+        setTimeout(keepFocus, 50);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (isAbsentView) return; // 未報到清單畫面時，暫不處理輸入，避免誤觸報到
+
+        if (e.key === 'Enter') {
+            handleExecute();
+            e.preventDefault();
+            return;
+        }
+
+        if (e.key === 'Backspace') {
+            scanBuffer = scanBuffer.slice(0, -1);
+            barcodeInput.value = scanBuffer;
+            e.preventDefault();
+            return;
+        }
+
+        // 忽略 Shift、Ctrl、方向鍵等非字元按鍵（e.key.length === 1 代表是單一可印字元）
+        if (e.key.length === 1) {
+            scanBuffer += e.key;
+            barcodeInput.value = scanBuffer;
+        }
+    });
+
     function handleExecute() {
-        const text = barcodeInput.value.trim();
+        const text = scanBuffer.trim();
         if (!text) return;
 
         if (/^\d+$/.test(text)) {
@@ -176,23 +265,28 @@
         } else {
             searchByName(text);
         }
-        barcodeInput.value = '';
-        barcodeInput.focus();
+
+        scanBuffer = "";
+        barcodeInput.value = "";
     }
 
+    // 「報到」按鈕保留，作為備用觸發方式（滑鼠點擊時，處理目前緩衝區內容）
     executeBtn.addEventListener('click', handleExecute);
-    barcodeInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleExecute();
-    });
 
     // ==================== 依編號報到 ====================
     async function checkinByCode(code) {
         const data = await callGas('checkin', { code });
         if (!data) return;
 
-        if (data.status === 'success') {
-            checkedInCount++;
+        // 直接採用雲端回傳的最新真實數字，不自己 +1，
+        // 這樣不管幾台裝置同時操作，顯示的都是雲端當下的真實狀態。
+        if (typeof data.total === 'number' && typeof data.checked_in === 'number') {
+            totalCount = data.total;
+            checkedInCount = data.checked_in;
             updateStatsDisplay();
+        }
+
+        if (data.status === 'success') {
             showStatus("✅ 報到成功！", `編 號： ${data.code}\n\n姓 名： ${data.name}\n\n報到時間： ${data.time}`, 'success');
             if (data.show_smiley) renderSmiley();
         } else if (data.status === 'duplicate') {
@@ -344,7 +438,7 @@
         toolbarFrame.style.display = 'flex';
         statusFrame.style.display = 'flex';
         cameraControlContainer.style.display = 'block';
-        barcodeInput.focus();
+        keepFocus();
     };
 
     async function loadAbsentList() {
