@@ -340,12 +340,20 @@
         isCameraRunning = true;
 
         if (!html5QrCode) {
-            html5QrCode = new Html5Qrcode("reader");
+            // 指定只辨識 CODE 128 一維條碼，辨識速度更快、更準確
+            html5QrCode = new Html5Qrcode("reader", {
+                formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ],
+                verbose: false
+            });
         }
 
         html5QrCode.start(
             { facingMode: "environment" },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
+            {
+                fps: 10,
+                // 一維條碼是長條形，掃描框改成扁長方形比較容易對準
+                qrbox: { width: 280, height: 120 }
+            },
             (decodedText) => {
                 stopCamera();
                 checkinByCode(decodedText.trim());
