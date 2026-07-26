@@ -200,7 +200,15 @@
     // 綁在整個網頁（document）上，不論滑鼠點在畫面哪個位置，
     // 只要這個分頁是目前作用中的分頁，就能接收掃描槍打出來的字元。
     // 輸入框本身設為 readonly，只作為「目前輸入內容」的顯示用途。
-    barcodeInput.setAttribute('readonly', 'readonly');
+    // 偵測是否為觸控裝置（例如 iPhone / iPad）。
+    // 只有非觸控裝置（筆電，使用實體鍵盤/掃描槍）才設為 readonly，
+    // 因為 iOS 對 readonly 欄位不會跳出螢幕鍵盤；
+    // 觸控裝置維持一般可編輯欄位，才能正常手動打字。
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+
+    if (!isTouchDevice) {
+        barcodeInput.setAttribute('readonly', 'readonly');
+    }
 
     // ==================== 自動維持輸入框焦點 ====================
     // 目的：筆電使用實體/藍牙掃描槍時，掃描槍其實是用「模擬鍵盤輸入」的方式運作。
@@ -208,11 +216,8 @@
     // 否則就算監聽器綁在 document 上也可能收不到。
     // 以下機制讓輸入框「隨時自動保持在被選取狀態」，使用者完全不需要手動點擊，
     // 掃描槍掃描後就能直接寫入 Google Sheet，跟手機相機掃描一樣「隨掃即用」。
-    // 偵測是否為觸控裝置（例如 iPhone / iPad）。
     // 觸控裝置維持「使用者點一下才聚焦、才彈出螢幕鍵盤」的原生行為；
     // 只有非觸控裝置（例如筆電，操作方式是滑鼠 + 實體鍵盤/掃描槍）才啟用自動搶焦點機制。
-    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
-
     function keepFocus() {
         if (isTouchDevice) return; // 觸控裝置不強制搶焦點，避免螢幕鍵盤無法正常彈出
         if (isAbsentView) return; // 在未報到清單畫面時不搶焦點，避免影響瀏覽
@@ -250,6 +255,10 @@
             return;
         }
 
+        // 觸控裝置（iPhone/iPad）交給下面的原生 input 事件處理文字同步，
+        // 這裡不再手動攔截字元／退格鍵，避免跟螢幕鍵盤的原生輸入重複或衝突。
+        if (isTouchDevice) return;
+
         if (e.key === 'Backspace') {
             scanBuffer = scanBuffer.slice(0, -1);
             barcodeInput.value = scanBuffer;
@@ -263,6 +272,14 @@
             barcodeInput.value = scanBuffer;
         }
     });
+
+    if (isTouchDevice) {
+        // 觸控裝置：欄位是一般可編輯欄位，使用者用螢幕鍵盤打字時，
+        // 直接同步輸入框目前內容到 scanBuffer（包含手動刪除、修改都會同步）。
+        barcodeInput.addEventListener('input', () => {
+            scanBuffer = barcodeInput.value;
+        });
+    }
 
     function handleExecute() {
         const text = scanBuffer.trim();
