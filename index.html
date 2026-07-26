@@ -88,7 +88,7 @@
         </button>
         <div class="w-full bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 flex-1 shadow-xl max-h-[500px] overflow-y-auto border border-slate-200 dark:border-slate-700">
             <div id="absent-count-label" class="text-xl font-bold text-center mb-4 text-slate-700 dark:text-slate-200"></div>
-            <div id="absent-list-content" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-center"></div>
+            <div id="absent-list-content" class="grid grid-cols-2 gap-3 text-center"></div>
         </div>
     </div>
 
@@ -208,30 +208,38 @@
     // 否則就算監聽器綁在 document 上也可能收不到。
     // 以下機制讓輸入框「隨時自動保持在被選取狀態」，使用者完全不需要手動點擊，
     // 掃描槍掃描後就能直接寫入 Google Sheet，跟手機相機掃描一樣「隨掃即用」。
+    // 偵測是否為觸控裝置（例如 iPhone / iPad）。
+    // 觸控裝置維持「使用者點一下才聚焦、才彈出螢幕鍵盤」的原生行為；
+    // 只有非觸控裝置（例如筆電，操作方式是滑鼠 + 實體鍵盤/掃描槍）才啟用自動搶焦點機制。
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+
     function keepFocus() {
+        if (isTouchDevice) return; // 觸控裝置不強制搶焦點，避免螢幕鍵盤無法正常彈出
         if (isAbsentView) return; // 在未報到清單畫面時不搶焦點，避免影響瀏覽
         if (document.activeElement !== barcodeInput) {
             barcodeInput.focus();
         }
     }
 
-    // 頁面載入完成，先聚焦一次
-    window.addEventListener('load', () => barcodeInput.focus());
+    if (!isTouchDevice) {
+        // 頁面載入完成，先聚焦一次
+        window.addEventListener('load', () => barcodeInput.focus());
 
-    // 輸入框一旦失去焦點，極短時間內自動搶回來
-    barcodeInput.addEventListener('blur', () => {
-        setTimeout(keepFocus, 50);
-    });
+        // 輸入框一旦失去焦點，極短時間內自動搶回來
+        barcodeInput.addEventListener('blur', () => {
+            setTimeout(keepFocus, 50);
+        });
 
-    // 保險機制：每 0.3 秒檢查一次，確保長時間使用焦點不會悄悄跑掉
-    setInterval(keepFocus, 300);
+        // 保險機制：每 0.3 秒檢查一次，確保長時間使用焦點不會悄悄跑掉
+        setInterval(keepFocus, 300);
 
-    // 使用者點擊畫面空白處時，也自動把焦點帶回輸入框
-    // （但點擊按鈕、候選清單等互動元件時不搶，避免影響原本的點擊功能）
-    document.addEventListener('click', (e) => {
-        if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
-        setTimeout(keepFocus, 50);
-    });
+        // 使用者點擊畫面空白處時，也自動把焦點帶回輸入框
+        // （但點擊按鈕、候選清單等互動元件時不搶，避免影響原本的點擊功能）
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
+            setTimeout(keepFocus, 50);
+        });
+    }
 
     document.addEventListener('keydown', (e) => {
         if (isAbsentView) return; // 未報到清單畫面時，暫不處理輸入，避免誤觸報到
