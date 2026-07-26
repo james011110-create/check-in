@@ -6,9 +6,7 @@
     <title>活動快速報到系統</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS Excel 處理 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- HTML5 QR Code 掃描器 -->
+    <!-- HTML5 QR Code / Barcode 掃描器 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; }
@@ -21,25 +19,17 @@
         富友開發說明會快速報到系統
     </h1>
 
-    <!-- 檔案上載提示區（完美置中） -->
-    <div id="file-upload-container" class="w-full max-w-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border border-amber-200 dark:border-amber-900/50 p-5 rounded-2xl mb-4 shadow-lg shadow-amber-500/5 text-center flex flex-col items-center justify-center">
-        <p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-3 text-center w-full">請先上傳您的檔案以開始使用：</p>
-        <div class="flex justify-center w-full">
-            <input type="file" id="excel-file-input" accept=".xlsx" class="text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer transition shadow-sm mx-auto block">
-        </div>
-    </div>
-
     <!-- 固定統計區塊 -->
     <div class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-blue-100 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-xl shadow-blue-500/5 text-center">
         <div id="stats-label" class="text-2xl md:text-3xl font-black text-blue-900 dark:text-blue-300 tracking-wide">
-            已報到人數：0 / 0
+            已報到人數：載入中…
         </div>
     </div>
 
     <!-- 相機掃描控制按鈕區 -->
-    <div id="camera-control-container" class="w-full max-w-xl mb-4" style="display:none;">
+    <div id="camera-control-container" class="w-full max-w-xl mb-4">
         <button id="toggle-camera-btn" class="w-full h-14 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold rounded-2xl transition shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 text-lg">
-            📷 <span>開啟相機掃描 QR Code</span>
+            📷 <span>開啟相機掃描條碼</span>
         </button>
         <!-- 相機即時預覽框 (預設隱藏) -->
         <div id="reader-container" class="w-full bg-black rounded-2xl overflow-hidden mt-3 shadow-inner hidden relative">
@@ -50,10 +40,10 @@
         </div>
     </div>
 
-    <!-- 輸入與按鈕操作區（輸入框高度與佔比縮小） -->
+    <!-- 輸入與按鈕操作區 -->
     <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
         <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-2.5">
-            直接掃描，或輸入編號/姓名
+            掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名
         </p>
         <div class="flex gap-2 items-center justify-center">
             <input type="text" id="barcode-input" placeholder="請輸入編號或姓名…" autocomplete="off"
@@ -69,9 +59,6 @@
         <button id="view-absent-btn" class="flex-1 h-12 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/80 text-rose-600 dark:text-rose-400 font-bold rounded-xl transition shadow-sm border border-sky-200/60 dark:border-sky-900">
             查看未報到清單
         </button>
-        <button id="download-btn" class="h-12 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/20" style="display:none;">
-            下載最新報到表
-        </button>
     </div>
 
     <!-- 狀態顯示與結果區塊 -->
@@ -80,7 +67,7 @@
             等待掃描或輸入…
         </div>
         <div id="info-label" class="text-lg md:text-xl text-slate-600 dark:text-slate-300 whitespace-pre-line leading-relaxed">
-            請上傳 Excel 檔並進行報到作業
+            請進行報到作業
         </div>
         <div id="smiley-container" class="mt-4"></div>
     </div>
@@ -106,14 +93,15 @@
     </div>
 
 <script>
-    let workbook = null;
-    let excelData = [];
+    // ---------------- GAS Web App 網址設定 ----------------
+    // 與 Python 版本使用同一個 GAS 網址，資料來源是同一份雲端 Google Sheet「報到表」
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwq3aK8bCYD_p-zKEmfp-UXKZyguwF5_pdwtxiofGs1La1TrzDhQ90VpmWgDbcHr9Ly/exec";
+
     let totalCount = 0;
     let checkedInCount = 0;
     let html5QrCode = null;
     let isCameraRunning = false;
 
-    const fileInput = document.getElementById('excel-file-input');
     const barcodeInput = document.getElementById('barcode-input');
     const executeBtn = document.getElementById('execute-btn');
     const statsLabel = document.getElementById('stats-label');
@@ -121,12 +109,11 @@
     const statusTitle = document.getElementById('status-title');
     const infoLabel = document.getElementById('info-label');
     const smileyContainer = document.getElementById('smiley-container');
-    const downloadBtn = document.getElementById('download-btn');
     const cameraControlContainer = document.getElementById('camera-control-container');
     const toggleCameraBtn = document.getElementById('toggle-camera-btn');
     const readerContainer = document.getElementById('reader-container');
     const closeCameraBtn = document.getElementById('close-camera-btn');
-    
+
     const viewAbsentBtn = document.getElementById('view-absent-btn');
     const backToCheckinBtn = document.getElementById('back-to-checkin-btn');
     const absentViewContainer = document.getElementById('absent-view-container');
@@ -147,40 +134,31 @@
         neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
     };
 
-    fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const data = new Uint8Array(event.target.result);
-                workbook = XLSX.read(data, { type: 'array' });
-                parseExcelData();
-                downloadBtn.style.display = 'block';
-                cameraControlContainer.style.display = 'block';
-                showStatus("✅ 檔案載入成功", `已成功載入報到名單，總計 ${totalCount} 位貴賓。\n您可以開始進行報到作業。`, 'success');
-            } catch (err) {
-                showStatus("❌ 載入失敗", `讀取 Excel 檔案發生錯誤：\n${err.message}`, 'error');
+    // ==================== 呼叫 GAS 共用函式 ====================
+    async function callGas(action, params = {}) {
+        const query = new URLSearchParams({ action, ...params });
+        try {
+            const resp = await fetch(`${GAS_URL}?${query.toString()}`);
+            const data = await resp.json();
+            if (!data.ok) {
+                showStatus("❌ 雲端回應錯誤", data.error || "未知錯誤", 'error');
+                return null;
             }
-        };
-        reader.readAsArrayBuffer(file);
-    });
-
-    function parseExcelData() {
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
-        excelData = json;
-        totalCount = 0;
-        checkedInCount = 0;
-
-        for (let i = 1; i < json.length; i++) {
-            let row = json[i];
-            if (!row || row[0] === undefined || String(row[0]).trim() === "") continue;
-            totalCount++;
-            if (row[2]) checkedInCount++;
+            return data;
+        } catch (err) {
+            showStatus("❌ 網路錯誤", `無法連線到雲端服務，請檢查網路連線後再試一次。\n${err.message}`, 'error');
+            return null;
         }
+    }
+
+    // ==================== 頁面載入時，自動抓取雲端統計 ====================
+    window.addEventListener('DOMContentLoaded', loadInitialStats);
+
+    async function loadInitialStats() {
+        const data = await callGas('stats');
+        if (!data) return;
+        totalCount = data.total;
+        checkedInCount = data.checked_in;
         updateStatsDisplay();
     }
 
@@ -188,11 +166,8 @@
         statsLabel.innerText = `已報到人數：${checkedInCount} / ${totalCount}`;
     }
 
+    // ==================== 手動輸入 / Enter 觸發 ====================
     function handleExecute() {
-        if (!workbook) {
-            alert("請先上傳 Excel 報到檔案！");
-            return;
-        }
         const text = barcodeInput.value.trim();
         if (!text) return;
 
@@ -210,66 +185,29 @@
         if (e.key === 'Enter') handleExecute();
     });
 
-    function checkinByCode(code) {
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        
-        let found = false;
-        let guestName = "";
-        let rowIndex = -1;
+    // ==================== 依編號報到 ====================
+    async function checkinByCode(code) {
+        const data = await callGas('checkin', { code });
+        if (!data) return;
 
-        for (let i = 1; i < excelData.length; i++) {
-            let row = excelData[i];
-            if (row && row[0] !== undefined && String(row[0]).trim() === code) {
-                found = true;
-                guestName = row[1] || "";
-                rowIndex = i;
-                break;
-            }
-        }
-
-        if (found) {
-            let existingTime = excelData[rowIndex][2];
-            let now = new Date();
-            let currentTime = now.getFullYear() + '-' + 
-                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                String(now.getDate()).padStart(2, '0') + ' ' + 
-                String(now.getHours()).padStart(2, '0') + ':' + 
-                String(now.getMinutes()).padStart(2, '0') + ':' + 
-                String(now.getSeconds()).padStart(2, '0');
-
-            if (existingTime) {
-                showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${guestName}\n\n原報到時間： ${existingTime}`, 'duplicate');
-            } else {
-                excelData[rowIndex][2] = currentTime;
-                worksheet[XLSX.utils.encode_cell({ r: rowIndex, c: 2 })] = { t: 's', v: currentTime };
-                
-                checkedInCount++;
-                updateStatsDisplay();
-
-                let remarkVal = excelData[rowIndex][3] || "";
-                let showSmileyFlag = String(remarkVal).includes("資");
-
-                showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${guestName}\n\n報到時間： ${currentTime}`, 'success');
-                if (showSmileyFlag) renderSmiley();
-            }
+        if (data.status === 'success') {
+            checkedInCount++;
+            updateStatsDisplay();
+            showStatus("✅ 報到成功！", `編 號： ${data.code}\n\n姓 名： ${data.name}\n\n報到時間： ${data.time}`, 'success');
+            if (data.show_smiley) renderSmiley();
+        } else if (data.status === 'duplicate') {
+            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${data.code}\n\n姓 名： ${data.name}\n\n原報到時間： ${data.time}`, 'duplicate');
         } else {
             showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
         }
     }
 
-    function searchByName(keyword) {
-        let matches = [];
-        for (let i = 1; i < excelData.length; i++) {
-            let row = excelData[i];
-            if (row && row[1] && String(row[1]).includes(keyword)) {
-                let codeVal = String(row[0]).trim();
-                let nameVal = String(row[1]).trim();
-                let existingTime = row[2];
-                matches.push({ code: codeVal, name: nameVal, time: existingTime });
-            }
-        }
+    // ==================== 姓名模糊查詢 ====================
+    async function searchByName(keyword) {
+        const data = await callGas('search_name', { keyword });
+        if (!data) return;
 
+        const matches = data.matches || [];
         if (matches.length === 0) {
             hideCandidates();
             showStatus("❌ 查無此姓名", `找不到姓名包含「${keyword}」的貴賓，請重新確認！`, 'error');
@@ -284,9 +222,9 @@
         candidatesTitle.innerText = `姓名包含「${keyword}」，共找到 ${matches.length} 筆，請點選正確的貴賓：`;
 
         matches.forEach(m => {
-            let tag = m.time ? "（已報到）" : "";
+            let tag = m.checked_in ? "（已報到）" : "";
             let btn = document.createElement('button');
-            btn.className = `w-full py-3 px-4 rounded-xl font-bold text-lg text-white transition shadow-sm ${m.time ? 'bg-slate-500 hover:bg-slate-600' : 'bg-blue-600 hover:bg-blue-700'}`;
+            btn.className = `w-full py-3 px-4 rounded-xl font-bold text-lg text-white transition shadow-sm ${m.checked_in ? 'bg-slate-500 hover:bg-slate-600' : 'bg-blue-600 hover:bg-blue-700'}`;
             btn.innerText = `編號 ${m.code} 姓名 ${m.name}${tag}`;
             btn.onclick = () => {
                 hideCandidates();
@@ -307,6 +245,8 @@
 
     function showStatus(title, info, type) {
         smileyContainer.innerHTML = '';
+        statusFrame.style.display = 'flex';
+        candidatesFrame.style.display = 'none';
         statusFrame.className = `w-full max-w-xl rounded-2xl p-6 mb-4 shadow-xl text-center flex flex-col items-center justify-center min-h-[220px] transition-all border ${THEMES[type].bg}`;
         statusTitle.className = `text-2xl md:text-3xl font-extrabold mb-3 ${THEMES[type].titleColor}`;
         statusTitle.innerText = title;
@@ -324,6 +264,7 @@
         `;
     }
 
+    // ==================== 相機掃描（CODE 128 一維條碼） ====================
     toggleCameraBtn.onclick = () => {
         if (!isCameraRunning) {
             startCamera();
@@ -369,7 +310,7 @@
         if (html5QrCode && isCameraRunning) {
             html5QrCode.stop().then(() => {
                 readerContainer.classList.add('hidden');
-                toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描 QR Code";
+                toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描條碼";
                 isCameraRunning = false;
             }).catch(err => {
                 console.error("停止相機失敗", err);
@@ -378,16 +319,13 @@
             });
         } else {
             readerContainer.classList.add('hidden');
-            toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描 QR Code";
+            toggleCameraBtn.querySelector('span').innerText = "開啟相機掃描條碼";
             isCameraRunning = false;
         }
     }
 
+    // ==================== 查看未報到清單 ====================
     viewAbsentBtn.onclick = () => {
-        if (!workbook) {
-            alert("請先上傳 Excel 報到檔案！");
-            return;
-        }
         if (isCameraRunning) stopCamera();
 
         inputFrame.style.display = 'none';
@@ -409,18 +347,14 @@
         barcodeInput.focus();
     };
 
-    function loadAbsentList() {
+    async function loadAbsentList() {
+        absentListContent.innerHTML = `<div class="col-span-full py-6 text-slate-500">載入中…</div>`;
+
+        const data = await callGas('absent_list');
         absentListContent.innerHTML = '';
-        let absentList = [];
+        if (!data) return;
 
-        for (let i = 1; i < excelData.length; i++) {
-            let row = excelData[i];
-            if (!row || row[0] === undefined || String(row[0]).trim() === "") continue;
-            if (!row[2]) {
-                absentList.push({ code: String(row[0]).trim(), name: row[1] ? String(row[1]).trim() : "" });
-            }
-        }
-
+        const absentList = data.absent || [];
         absentCountLabel.innerText = `尚未報到（共 ${absentList.length} 位）`;
 
         if (absentList.length === 0) {
@@ -434,14 +368,6 @@
             });
         }
     }
-
-    downloadBtn.onclick = () => {
-        if (!workbook) return;
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = XLSX.utils.aoa_to_sheet(excelData);
-        workbook.Sheets[firstSheetName] = worksheet;
-        XLSX.writeFile(workbook, "報到表_已更新.xlsx");
-    };
 </script>
 </body>
 </html>
