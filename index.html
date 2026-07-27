@@ -241,6 +241,7 @@
     // 正式活動時，只把「不帶 admin 參數」的一般連結分享出去，帶 admin 的網址自己留著用。
     const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
     const ADMIN_PASSWORD = "29770188910812";
+    let isModalOpen = false;
 
     const adminSettingsBtn = document.getElementById('admin-settings-btn');
     const adminModal = document.getElementById('admin-modal');
@@ -263,6 +264,7 @@
 
     // 點齒輪先跳出密碼輸入層，驗證通過才會顯示真正的管理面板
     adminSettingsBtn.onclick = () => {
+        isModalOpen = true;
         passwordInput.value = '';
         passwordError.innerText = '';
         passwordModal.style.display = 'flex';
@@ -270,6 +272,7 @@
     };
 
     passwordCancelBtn.onclick = () => {
+        isModalOpen = false;
         passwordModal.style.display = 'none';
     };
 
@@ -295,6 +298,7 @@
     });
 
     adminCloseBtn.onclick = () => {
+        isModalOpen = false;
         adminModal.style.display = 'none';
     };
 
@@ -429,6 +433,7 @@
     function keepFocus() {
         if (isTouchDevice) return; // 觸控裝置不強制搶焦點，避免螢幕鍵盤無法正常彈出
         if (isAbsentView) return; // 在未報到清單畫面時不搶焦點，避免影響瀏覽
+        if (isModalOpen) return; // 密碼框或管理面板開啟中，不搶焦點，避免干擾輸入
         if (document.activeElement !== barcodeInput) {
             barcodeInput.focus();
         }
@@ -441,6 +446,7 @@
         });
         setInterval(keepFocus, 300);
         document.addEventListener('click', (e) => {
+            if (isModalOpen) return;
             if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
             setTimeout(keepFocus, 50);
         });
