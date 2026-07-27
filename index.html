@@ -92,20 +92,43 @@
         </div>
     </div>
 
-<script>
-    // ---------------- GAS Web App 網址設定 ----------------
-    // 與 Python 版本使用同一個 GAS 網址，資料來源是同一份雲端 Google Sheet「報到表」
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbwq3aK8bCYD_p-zKEmfp-UXKZyguwF5_pdwtxiofGs1La1TrzDhQ90VpmWgDbcHr9Ly/exec";
+<script type="module">
+    // ==================== Firebase 初始化 ====================
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+    import {
+        getDatabase, ref, onValue, runTransaction
+    } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 
-    let totalCount = 0;
-    let checkedInCount = 0;
-    let html5QrCode = null;
-    let isCameraRunning = false;
+    const firebaseConfig = {
+        apiKey: "AIzaSyDQKCRVYqVDZaRFCfCFMenq2eqssut1c1I",
+        authDomain: "checkin-961b5.firebaseapp.com",
+        databaseURL: "https://checkin-961b5-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "checkin-961b5",
+        storageBucket: "checkin-961b5.firebasestorage.app",
+        messagingSenderId: "1010761947",
+        appId: "1:1010761947:web:abdf83e6080ea0428b4cfe"
+    };
 
-    // 掃描槍/手動輸入的緩衝區，不依賴輸入框是否有焦點，
-    // 只要這個分頁是瀏覽器目前作用中的分頁，就能接收鍵盤輸入。
-    let scanBuffer = "";
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const rootRef = ref(db);
+
+    // 本地快取的完整資料，會透過即時監聽自動保持最新，
+    // 姓名查詢、未報到清單都直接篩選這份快取，不用再另外發請求。
+    let allData = {};
     let isAbsentView = false;
+
+    // ==================== 時間格式化（固定使用台北時區，避免裝置時區設定不同造成顯示不一致） ====================
+    function formatTime(date) {
+        const parts = new Intl.DateTimeFormat('zh-TW', {
+            timeZone: 'Asia/Taipei',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour12: false
+        }).formatToParts(date);
+        const get = t => (parts.find(p => p.type === t) || {}).value || '';
+        return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+    }
 
     const barcodeInput = document.getElementById('barcode-input');
     const executeBtn = document.getElementById('execute-btn');
@@ -139,67 +162,33 @@
         neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
     };
 
-    // ==================== 呼叫 GAS 共用函式 ====================
-    // silent = true 時（例如背景定期輪詢），失敗不跳出錯誤訊息，避免干擾畫面，靜默略過即可。
-    async function callGas(action, params = {}, silent = false) {
-        const query = new URLSearchParams({ action, ...params });
-        try {
-            const resp = await fetch(`${GAS_URL}?${query.toString()}`);
-            const data = await resp.json();
-            if (!data.ok) {
-                if (!silent) showStatus("❌ 雲端回應錯誤", data.error || "未知錯誤", 'error');
-                return null;
-            }
-            return data;
-        } catch (err) {
-            if (!silent) showStatus("❌ 網路錯誤", `無法連線到雲端服務，請檢查網路連線後再試一次。\n${err.message}`, 'error');
-            return null;
-        }
-    }
-
-    // ==================== 頁面載入時，自動抓取雲端統計 ====================
-    window.addEventListener('DOMContentLoaded', loadInitialStats);
-
-    async function loadInitialStats() {
-        const data = await callGas('stats');
-        if (!data) return;
-        totalCount = data.total;
-        checkedInCount = data.checked_in;
+    // ==================== 即時監聽整份資料庫 ====================
+    // 資料庫只要有任何異動（不管是這台裝置自己寫入，還是另一台裝置寫入），
+    // 這個 callback 都會立刻自動觸發，不需要輪詢。
+    onValue(rootRef, (snapshot) => {
+        allData = snapshot.val() || {};
         updateStatsDisplay();
-    }
-
-    // ==================== 定期自動輪詢，讓沒有在操作的裝置也能自動同步 ====================
-    // 例如筆電報到後，手機這邊不用手動整理，幾秒內畫面會自動更新最新人數。
-    // 注意：這是「每隔幾秒問一次雲端」，不是毫秒級即時推播，會有幾秒的些微延遲。
-    const STATS_POLL_INTERVAL_MS = 5000;
-
-    async function refreshStats() {
-        if (isAbsentView) return; // 在未報到清單畫面時，暫不干擾，避免畫面被打斷
-        const data = await callGas('stats', {}, true);
-        if (!data) return; // 輪詢失敗（例如網路暫時不穩）就靜默略過，下一輪再試
-        totalCount = data.total;
-        checkedInCount = data.checked_in;
-        updateStatsDisplay();
-    }
-
-    setInterval(refreshStats, STATS_POLL_INTERVAL_MS);
-
-    // 分頁從背景切回前景時（例如切去別的視窗又切回來），立刻刷新一次，
-    // 不用等到下一輪 5 秒輪詢，讓兩台裝置的同步感覺更即時。
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            refreshStats();
+        if (isAbsentView) {
+            renderAbsentList();
         }
+    }, (err) => {
+        statsLabel.innerText = "已報到人數：連線失敗";
+        console.error("Firebase 監聽錯誤：", err);
     });
 
     function updateStatsDisplay() {
-        statsLabel.innerText = `已報到人數：${checkedInCount} / ${totalCount}`;
+        let total = 0, checkedIn = 0;
+        Object.values(allData).forEach(item => {
+            if (!item || !item.編號) return;
+            total++;
+            if (item.報到時間) checkedIn++;
+        });
+        statsLabel.innerText = `已報到人數：${checkedIn} / ${total}`;
     }
 
     // ==================== 全網頁鍵盤監聽（掃描槍 = 快速鍵盤輸入） ====================
-    // 綁在整個網頁（document）上，不論滑鼠點在畫面哪個位置，
-    // 只要這個分頁是目前作用中的分頁，就能接收掃描槍打出來的字元。
-    // 輸入框本身設為 readonly，只作為「目前輸入內容」的顯示用途。
+    let scanBuffer = "";
+
     // 偵測是否為觸控裝置（例如 iPhone / iPad）。
     // 只有非觸控裝置（筆電，使用實體鍵盤/掃描槍）才設為 readonly，
     // 因為 iOS 對 readonly 欄位不會跳出螢幕鍵盤；
@@ -211,11 +200,6 @@
     }
 
     // ==================== 自動維持輸入框焦點 ====================
-    // 目的：筆電使用實體/藍牙掃描槍時，掃描槍其實是用「模擬鍵盤輸入」的方式運作。
-    // 瀏覽器要能收到這些按鍵事件，頁面本身必須要有作用中的焦點（focus），
-    // 否則就算監聽器綁在 document 上也可能收不到。
-    // 以下機制讓輸入框「隨時自動保持在被選取狀態」，使用者完全不需要手動點擊，
-    // 掃描槍掃描後就能直接寫入 Google Sheet，跟手機相機掃描一樣「隨掃即用」。
     // 觸控裝置維持「使用者點一下才聚焦、才彈出螢幕鍵盤」的原生行為；
     // 只有非觸控裝置（例如筆電，操作方式是滑鼠 + 實體鍵盤/掃描槍）才啟用自動搶焦點機制。
     function keepFocus() {
@@ -227,19 +211,11 @@
     }
 
     if (!isTouchDevice) {
-        // 頁面載入完成，先聚焦一次
         window.addEventListener('load', () => barcodeInput.focus());
-
-        // 輸入框一旦失去焦點，極短時間內自動搶回來
         barcodeInput.addEventListener('blur', () => {
             setTimeout(keepFocus, 50);
         });
-
-        // 保險機制：每 0.3 秒檢查一次，確保長時間使用焦點不會悄悄跑掉
         setInterval(keepFocus, 300);
-
-        // 使用者點擊畫面空白處時，也自動把焦點帶回輸入框
-        // （但點擊按鈕、候選清單等互動元件時不搶，避免影響原本的點擊功能）
         document.addEventListener('click', (e) => {
             if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
             setTimeout(keepFocus, 50);
@@ -266,7 +242,6 @@
             return;
         }
 
-        // 忽略 Shift、Ctrl、方向鍵等非字元按鍵（e.key.length === 1 代表是單一可印字元）
         if (e.key.length === 1) {
             scanBuffer += e.key;
             barcodeInput.value = scanBuffer;
@@ -274,17 +249,14 @@
     });
 
     if (isTouchDevice) {
-        // 觸控裝置：欄位是一般可編輯欄位，使用者用螢幕鍵盤打字時，
-        // 直接同步輸入框目前內容到 scanBuffer（包含手動刪除、修改都會同步）。
         barcodeInput.addEventListener('input', () => {
             scanBuffer = barcodeInput.value;
         });
     }
 
     // ==================== 掃描排隊機制 ====================
-    // 目的：不管掃描/輸入速度多快（例如上一筆報到還沒收到雲端回應，就掃了下一筆），
-    // 都先進入隊列排隊，確保「一次只處理一筆」，處理完（不論成功或失敗）才自動接著處理下一筆，
-    // 這樣可以避免同一個分頁內，多筆請求同時送出造成的競爭問題，也不會遺失任何一筆掃描。
+    // 不管掃描/輸入速度多快，都先進隊列排隊，確保一次只處理一筆，
+    // 處理完才自動接著處理下一筆，避免同一分頁內多筆請求同時送出造成混亂。
     let isProcessing = false;
     const scanQueue = [];
 
@@ -318,38 +290,60 @@
         barcodeInput.value = "";
     }
 
-    // 「報到」按鈕保留，作為備用觸發方式（滑鼠點擊時，處理目前緩衝區內容）
     executeBtn.addEventListener('click', handleExecute);
 
-    // ==================== 依編號報到 ====================
+    // ==================== 依編號報到（Firebase Transaction，避免多裝置同時寫入衝突） ====================
     async function checkinByCode(code) {
-        const data = await callGas('checkin', { code });
-        if (!data) return;
+        const nodeRef = ref(db, code);
+        let committed = false;
+        let data = null;
 
-        // 直接採用雲端回傳的最新真實數字，不自己 +1，
-        // 這樣不管幾台裝置同時操作，顯示的都是雲端當下的真實狀態。
-        if (typeof data.total === 'number' && typeof data.checked_in === 'number') {
-            totalCount = data.total;
-            checkedInCount = data.checked_in;
-            updateStatsDisplay();
+        try {
+            const txResult = await runTransaction(nodeRef, (currentData) => {
+                if (currentData === null) return; // 查無此編號，中止交易
+                if (currentData.報到時間) return; // 已經報到過，中止交易（不覆寫）
+                currentData.報到時間 = new Date().toISOString();
+                return currentData;
+            });
+            committed = txResult.committed;
+            data = txResult.snapshot.val();
+        } catch (err) {
+            showStatus("❌ 寫入失敗", `無法連線到資料庫，請檢查網路連線後再試一次。\n${err.message}`, 'error');
+            return;
         }
 
-        if (data.status === 'success') {
-            showStatus("✅ 報到成功！", `編 號： ${data.code}\n\n姓 名： ${data.name}\n\n報到時間： ${data.time}`, 'success');
-            if (data.show_smiley) renderSmiley();
-        } else if (data.status === 'duplicate') {
-            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${data.code}\n\n姓 名： ${data.name}\n\n原報到時間： ${data.time}`, 'duplicate');
-        } else {
+        if (data === null) {
             showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
+            return;
+        }
+
+        const name = data.姓名 || '';
+        const timeDisplay = data.報到時間 ? formatTime(new Date(data.報到時間)) : '';
+
+        if (committed) {
+            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
+            const remark = data.備註 || '';
+            if (String(remark).indexOf('資') !== -1) renderSmiley();
+        } else {
+            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
         }
     }
 
-    // ==================== 姓名模糊查詢 ====================
+    // ==================== 姓名模糊查詢（直接篩選本地即時快取，不用另外發請求） ====================
     async function searchByName(keyword) {
-        const data = await callGas('search_name', { keyword });
-        if (!data) return;
+        const matches = [];
+        Object.entries(allData).forEach(([code, item]) => {
+            if (!item || !item.姓名) return;
+            if (String(item.姓名).indexOf(keyword) !== -1) {
+                matches.push({
+                    code: item.編號 || code,
+                    name: item.姓名,
+                    checked_in: !!item.報到時間,
+                    time: item.報到時間 ? formatTime(new Date(item.報到時間)) : null
+                });
+            }
+        });
 
-        const matches = data.matches || [];
         if (matches.length === 0) {
             hideCandidates();
             showStatus("❌ 查無此姓名", `找不到姓名包含「${keyword}」的貴賓，請重新確認！`, 'error');
@@ -370,7 +364,7 @@
             btn.innerText = `編號 ${m.code} 姓名 ${m.name}${tag}`;
             btn.onclick = () => {
                 hideCandidates();
-                checkinByCode(m.code);
+                enqueueScan(m.code);
             };
             candidatesList.appendChild(btn);
         });
@@ -407,6 +401,9 @@
     }
 
     // ==================== 相機掃描（CODE 128 一維條碼） ====================
+    let html5QrCode = null;
+    let isCameraRunning = false;
+
     toggleCameraBtn.onclick = () => {
         if (!isCameraRunning) {
             startCamera();
@@ -423,7 +420,6 @@
         isCameraRunning = true;
 
         if (!html5QrCode) {
-            // 指定只辨識 CODE 128 一維條碼，辨識速度更快、更準確
             html5QrCode = new Html5Qrcode("reader", {
                 formatsToSupport: [ Html5QrcodeSupportedFormats.CODE_128 ],
                 verbose: false
@@ -434,7 +430,6 @@
             { facingMode: "environment" },
             {
                 fps: 10,
-                // 一維條碼是長條形，掃描框改成扁長方形比較容易對準
                 qrbox: { width: 280, height: 120 }
             },
             (decodedText) => {
@@ -477,10 +472,12 @@
         cameraControlContainer.style.display = 'none';
         absentViewContainer.style.display = 'flex';
 
-        loadAbsentList();
+        isAbsentView = true;
+        renderAbsentList();
     };
 
     backToCheckinBtn.onclick = () => {
+        isAbsentView = false;
         absentViewContainer.style.display = 'none';
         inputFrame.style.display = 'block';
         toolbarFrame.style.display = 'flex';
@@ -489,15 +486,20 @@
         keepFocus();
     };
 
-    async function loadAbsentList() {
-        absentListContent.innerHTML = `<div class="col-span-full py-6 text-slate-500">載入中…</div>`;
+    // 直接篩選本地即時快取，不用另外發請求；資料庫有異動時（見上方 onValue）也會自動重新渲染。
+    function renderAbsentList() {
+        const absentList = Object.entries(allData)
+            .filter(([code, item]) => item && item.編號 && !item.報到時間)
+            .map(([code, item]) => ({ code: item.編號 || code, name: item.姓名 || '' }))
+            .sort((a, b) => {
+                const numA = parseInt(a.code, 10);
+                const numB = parseInt(b.code, 10);
+                if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+                return String(a.code).localeCompare(String(b.code));
+            });
 
-        const data = await callGas('absent_list');
-        absentListContent.innerHTML = '';
-        if (!data) return;
-
-        const absentList = data.absent || [];
         absentCountLabel.innerText = `尚未報到（共 ${absentList.length} 位）`;
+        absentListContent.innerHTML = '';
 
         if (absentList.length === 0) {
             absentListContent.innerHTML = `<div class="col-span-full py-10 text-xl font-bold text-slate-500">所有貴賓皆已報到！</div>`;
