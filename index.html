@@ -3,30 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>活動快速報到系統</title>
-    <!-- Tailwind CSS -->
+    <title>快速報到系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- HTML5 QR Code / Barcode 掃描器 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <!-- SheetJS，用於產生 Excel 檔案下載 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-200 dark:from-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col items-center p-4">
 
-    <!-- 頂部大標題 -->
     <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight mt-4 mb-3 text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
         富友開發說明會快速報到系統
     </h1>
 
-    <!-- 管理設定齒輪按鈕（僅網址帶 ?admin=1 時才會顯示） -->
     <button id="admin-settings-btn" class="fixed top-4 right-4 w-11 h-11 bg-slate-700 hover:bg-slate-800 text-white rounded-full shadow-lg items-center justify-center text-xl z-40" style="display:none;" title="管理設定">
         ⚙️
     </button>
 
-    <!-- 密碼輸入面板 -->
     <div id="password-modal" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display:none;">
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <h2 class="text-lg font-bold mb-4 text-slate-800 dark:text-slate-100 text-center">🔒 請輸入管理密碼</h2>
@@ -42,7 +37,6 @@
         </div>
     </div>
 
-    <!-- 管理設定面板 -->
     <div id="admin-modal" class="fixed inset-0 bg-black/50 z-50 items-center justify-center p-4" style="display:none;">
         <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h2 class="text-xl font-bold mb-4 text-slate-800 dark:text-slate-100">⚙️ 管理設定</h2>
@@ -68,19 +62,16 @@
         </div>
     </div>
 
-    <!-- 固定統計區塊 -->
     <div class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-blue-100 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-xl shadow-blue-500/5 text-center">
         <div id="stats-label" class="text-2xl md:text-3xl font-black text-blue-900 dark:text-blue-300 tracking-wide">
             已報到人數：載入中…
         </div>
     </div>
 
-    <!-- 相機掃描控制按鈕區 -->
     <div id="camera-control-container" class="w-full max-w-xl mb-4">
         <button id="toggle-camera-btn" class="w-full h-14 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold rounded-2xl transition shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 text-lg">
             📷 <span>開啟相機掃描條碼</span>
         </button>
-        <!-- 相機即時預覽框 (預設隱藏) -->
         <div id="reader-container" class="w-full bg-black rounded-2xl overflow-hidden mt-3 shadow-inner hidden relative">
             <div id="reader"></div>
             <button id="close-camera-btn" class="absolute top-3 right-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md z-10">
@@ -89,7 +80,6 @@
         </div>
     </div>
 
-    <!-- 輸入與按鈕操作區 -->
     <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
         <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-2.5">
             掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名（支援中文輸入）
@@ -103,14 +93,12 @@
         </div>
     </div>
 
-    <!-- 功能列 -->
     <div id="toolbar-frame" class="w-full max-w-xl flex gap-3 mb-4">
         <button id="view-absent-btn" class="flex-1 h-12 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/80 text-rose-600 dark:text-rose-400 font-bold rounded-xl transition shadow-sm border border-sky-200/60 dark:border-sky-900">
             查看未報到清單
         </button>
     </div>
 
-    <!-- 狀態顯示與結果區塊 -->
     <div id="status-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-6 mb-4 shadow-xl shadow-slate-200 dark:shadow-none text-center flex flex-col items-center justify-center min-h-[220px] transition-all border border-slate-200/80 dark:border-slate-700">
         <div id="status-title" class="text-2xl md:text-3xl font-extrabold mb-3 text-slate-700 dark:text-slate-200">
             等待掃描或輸入…
@@ -121,7 +109,6 @@
         <div id="smiley-container" class="mt-4"></div>
     </div>
 
-    <!-- 姓名候選清單畫面 -->
     <div id="candidates-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 mb-4 shadow-xl max-h-[380px] overflow-y-auto border border-slate-200 dark:border-slate-700" style="display:none;">
         <div id="candidates-title" class="font-bold text-center mb-3 text-slate-700 dark:text-slate-200"></div>
         <div id="candidates-list" class="flex flex-col gap-2"></div>
@@ -130,7 +117,6 @@
         </button>
     </div>
 
-    <!-- 未報到清單畫面 -->
     <div id="absent-view-container" class="w-full max-w-xl flex flex-col flex-1" style="display:none;">
         <button id="back-to-checkin-btn" class="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mb-4 shadow-lg shadow-blue-600/25 transition">
             返回報到系統
@@ -142,39 +128,26 @@
     </div>
 
 <script type="module">
-    // ==================== Firebase 初始化 ====================
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-    import {
-        getDatabase, ref, onValue, runTransaction, update
-    } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
-
-    const firebaseConfig = {
-        apiKey: "AIzaSyDQKCRVYqVDZaRFCfCFMenq2eqssut1c1I",
-        authDomain: "checkin-961b5.firebaseapp.com",
-        databaseURL: "https://checkin-961b5-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "checkin-961b5",
-        storageBucket: "checkin-961b5.firebasestorage.app",
-        messagingSenderId: "1010761947",
-        appId: "1:1010761947:web:abdf83e6080ea0428b4cfe"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-    const rootRef = ref(db);
+    // ==================== Supabase 初始化 ====================
+    const SUPABASE_URL = "https://yomsfevzmpuhthjnxran.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_dXoQYSL8EIEbuKrPx9KVaA_kFEitral";
+    
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const TABLE_NAME = "報到名單";
 
     let allData = {};
     let isAbsentView = false;
 
-    // ==================== 時間格式化（固定使用台北時區） ====================
+    // ==================== 時間格式化（改為 2026-07-26 15:05 格式） ====================
     function formatTime(date) {
         const parts = new Intl.DateTimeFormat('zh-TW', {
             timeZone: 'Asia/Taipei',
             year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            hour: '2-digit', minute: '2-digit',
             hour12: false
         }).formatToParts(date);
         const get = t => (parts.find(p => p.type === t) || {}).value || '';
-        return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+        return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
     }
 
     const barcodeInput = document.getElementById('barcode-input');
@@ -209,22 +182,39 @@
         neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
     };
 
-    // ==================== 即時監聽整份資料庫 ====================
-    onValue(rootRef, (snapshot) => {
-        allData = snapshot.val() || {};
-        updateStatsDisplay();
-        if (isAbsentView) {
-            renderAbsentList();
+    // ==================== 載入與即時監聽資料庫 ====================
+    async function fetchAllData() {
+        const { data, error } = await supabaseClient.from(TABLE_NAME).select('*');
+        if (error) {
+            statsLabel.innerText = "已報到人數：連線失敗";
+            console.error("Supabase 查詢錯誤：", error);
+            return;
         }
-    }, (err) => {
-        statsLabel.innerText = "已報到人數：連線失敗";
-        console.error("Firebase 監聽錯誤：", err);
-    });
+        allData = {};
+        data.forEach(item => {
+            if (item && item.編號 !== undefined && item.編號 !== null) {
+                allData[String(item.編號)] = item;
+            }
+        });
+        updateStatsDisplay();
+        if (isAbsentView) renderAbsentList();
+    }
+
+    // 初始載入
+    fetchAllData();
+
+    // 啟用 Supabase Realtime 即時監聽資料表變動
+    supabaseClient
+        .channel('public-db-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, (payload) => {
+            fetchAllData();
+        })
+        .subscribe();
 
     function updateStatsDisplay() {
         let total = 0, checkedIn = 0;
         Object.values(allData).forEach(item => {
-            if (!item || !item.編號) return;
+            if (!item || item.編號 === undefined) return;
             total++;
             if (item.報到時間) checkedIn++;
         });
@@ -304,7 +294,7 @@
 
     adminDownloadBtn.onclick = () => {
         const sorted = Object.entries(allData)
-            .filter(([code, item]) => item && item.編號)
+            .filter(([code, item]) => item && item.編號 !== undefined)
             .sort((a, b) => {
                 const numA = parseInt(a[1].編號 || a[0], 10);
                 const numB = parseInt(b[1].編號 || b[0], 10);
@@ -347,12 +337,14 @@
 
         adminMessage.innerText = '處理中…';
         try {
-            const updates = {};
-            targets.forEach(([code]) => {
-                updates[`${code}/報到時間`] = null;
-            });
-            await update(rootRef, updates);
-            adminMessage.innerText = `已清除 ${targets.length} 筆報到紀錄。`;
+            const { error } = await supabaseClient
+                .from(TABLE_NAME)
+                .update({ 報到時間: null })
+                .not('報到時間', 'is', null);
+
+            if (error) throw error;
+            await fetchAllData();
+            adminMessage.innerText = `已清除報到紀錄。`;
         } catch (err) {
             adminMessage.innerText = `清除失敗：${err.message}`;
         }
@@ -382,28 +374,29 @@
         }
 
         const newCount = Object.keys(newData).length;
-        const ok = confirm(`即將用這份檔案（共 ${newCount} 筆）覆蓋整個報到名單，現有資料（包含所有報到紀錄）將會被取代！\n此動作無法復原，確定要繼續嗎？`);
+        const ok = confirm(`即將匯入 ${newCount} 筆資料到 Supabase，確定要繼續嗎？`);
         if (!ok) return;
 
         adminMessage.innerText = '匯入中…';
         try {
-            const updates = {};
-            Object.entries(newData).forEach(([code, item]) => {
-                updates[code] = item;
-            });
-            Object.keys(allData).forEach((code) => {
-                if (!(code in newData)) {
-                    updates[code] = null;
-                }
-            });
-            await update(rootRef, updates);
-            adminMessage.innerText = `已成功匯入 ${newCount} 筆資料。`;
+            const rowsToUpsert = Object.entries(newData).map(([code, item]) => ({
+                編號: item.編號 !== undefined ? item.編號 : code,
+                姓名: item.姓名 || '',
+                報到時間: item.報到時間 || null,
+                備註: item.備註 || null
+            }));
+
+            const { error } = await supabaseClient.from(TABLE_NAME).upsert(rowsToUpsert, { onConflict: '編號' });
+            if (error) throw error;
+
+            await fetchAllData();
+            adminMessage.innerText = `已成功匯入資料。`;
         } catch (err) {
             adminMessage.innerText = `匯入失敗：${err.message}`;
         }
     };
 
-    // ==================== 鍵盤與中文輸入處理（已支援筆電中文選字與條碼槍掃描） ====================
+    // ==================== 鍵盤與中文輸入處理 ====================
     window.addEventListener('load', () => {
         barcodeInput.focus();
     });
@@ -454,40 +447,49 @@
         processQueue();
     }
 
-    // ==================== 依編號報到（Firebase Transaction） ====================
+    // ==================== 依編號報到 (Supabase 寫入) ====================
     async function checkinByCode(code) {
-        const nodeRef = ref(db, code);
-        let committed = false;
-        let data = null;
-
         try {
-            const txResult = await runTransaction(nodeRef, (currentData) => {
-                if (currentData === null) return;
-                if (currentData.報到時間) return;
-                currentData.報到時間 = new Date().toISOString();
-                return currentData;
-            });
-            committed = txResult.committed;
-            data = txResult.snapshot.val();
+            const { data: rows, error: fetchErr } = await supabaseClient
+                .from(TABLE_NAME)
+                .select('*')
+                .eq('編號', code)
+                .limit(1);
+
+            if (fetchErr || !rows || rows.length === 0) {
+                showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
+                return;
+            }
+
+            const record = rows[0];
+            const name = record.姓名 || '';
+
+            if (record.報到時間) {
+                const timeDisplay = formatTime(new Date(record.報到時間));
+                showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
+                return;
+            }
+
+            const nowIso = new Date().toISOString();
+            const { error: updateErr } = await supabaseClient
+                .from(TABLE_NAME)
+                .update({ 報到時間: nowIso })
+                .eq('編號', code)
+                .is('報到時間', null);
+
+            if (updateErr) throw updateErr;
+
+            allData[code].報到時間 = nowIso;
+            updateStatsDisplay();
+
+            const timeDisplay = formatTime(new Date(nowIso));
+            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
+            
+            const remark = record.備註 || '';
+            if (String(remark).indexOf('資') !== -1) renderSmiley();
+
         } catch (err) {
             showStatus("❌ 寫入失敗", `無法連線到資料庫，請檢查網路連線後再試一次。\n${err.message}`, 'error');
-            return;
-        }
-
-        if (data === null) {
-            showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
-            return;
-        }
-
-        const name = data.姓名 || '';
-        const timeDisplay = data.報到時間 ? formatTime(new Date(data.報到時間)) : '';
-
-        if (committed) {
-            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
-            const remark = data.備註 || '';
-            if (String(remark).indexOf('資') !== -1) renderSmiley();
-        } else {
-            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
         }
     }
 
@@ -498,7 +500,7 @@
             if (!item || !item.姓名) return;
             if (String(item.姓名).indexOf(keyword) !== -1) {
                 matches.push({
-                    code: item.編號 || code,
+                    code: item.編號 !== undefined ? item.編號 : code,
                     name: item.姓名,
                     checked_in: !!item.報到時間,
                     time: item.報到時間 ? formatTime(new Date(item.報到時間)) : null
@@ -650,12 +652,12 @@
 
     function renderAbsentList() {
         const absentList = Object.entries(allData)
-            .filter(([code, item]) => item && item.編號 && !item.報到時間)
-            .map(([code, item]) => ({ code: item.編號 || code, name: item.姓名 || '' }))
+            .filter(([code, item]) => item && item.編號 !== undefined && !item.報到時間)
+            .map(([code, item]) => ({ code: item.編號 !== undefined ? item.編號 : code, name: item.姓名 || '' }))
             .sort((a, b) => {
                 const numA = parseInt(a.code, 10);
                 const numB = parseInt(b.code, 10);
-                if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+                if (!isNaN(numA) && !isNaN(numB) !== numA && numA !== numB) return numA - numB;
                 return String(a.code).localeCompare(String(b.code));
             });
 
