@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>報到即時看板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; }
+        @keyframes highlightFade {
+            0% { background-color: rgba(16, 185, 129, 0.25); }
+            100% { background-color: transparent; }
+        }
+        .just-checked-in {
+            animation: highlightFade 3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-200 dark:from-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col items-center p-4">
+
+    <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight mt-4 mb-3 text-center bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+        報到即時看板
+    </h1>
+
+    <div class="w-full max-w-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border border-blue-100 dark:border-slate-700 rounded-2xl p-5 mb-4 shadow-xl shadow-blue-500/5 text-center">
+        <div id="stats-label" class="text-2xl md:text-3xl font-black text-blue-900 dark:text-blue-300 tracking-wide">
+            已報到人數：載入中…
+        </div>
+    </div>
+
+    <div class="w-full max-w-2xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-5 shadow-xl border border-slate-200 dark:border-slate-700 flex-1">
+        <div id="list-content" class="flex flex-col gap-2">
+            <div class="text-center text-slate-400 py-10">載入中…</div>
+        </div>
+    </div>
+
+<script type="module">
+    // ==================== Supabase 初始化 ====================
+    const SUPABASE_URL = "https://yomsfevzmpuhthjnxran.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_dXoQYSL8EIEbuKrPx9KVaA_kFEitral";
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const TABLE_NAME = "報到名單";
+
+    let allData = {};
+
+    const statsLabel = document.getElementById('stats-label');
+    const listContent = document.getElementById('list-content');
+
+    // ==================== 時間格式化（台北時區） ====================
+    function formatTime(date) {
+        const parts = new Intl.DateTimeFormat('zh-TW', {
+            timeZone: 'Asia/Taipei',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+            hour12: false
+        }).formatToParts(date);
+        const get = t => (parts.find(p => p.type === t) || {}).value || '';
+        return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+    }
+
+    // ==================== 初始載入 ====================
+    async function fetchAllData() {
+        const { data, error } = await supabaseClient.from(TABLE_NAME).select('*');
+        if (error) {
+            statsLabel.innerText = "已報到人數：連線失敗";
+            console.error("Supabase 查詢錯誤：", error);
+            return;
+        }
+        allData = {};
+        data.forEach(item => {
+            if (item && item.編號 !== undefined && item.編號 !== null) {
+                allData[String(item.編號)] = item;
+            }
+        });
+        render();
+    }
+
+    fetchAllData();
+
+    // ==================== Realtime 監聽：局部更新，不整表重抓 ====================
+    supabaseClient
+        .channel('boss-view-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, (payload) => {
+            let newlyCheckedInCode = null;
+
+            if (payload.eventType === 'DELETE') {
+                const oldRec = payload.old;
+                if (oldRec && oldRec.編號 !== undefined && oldRec.編號 !== null) {
+                    delete allData[String(oldRec.編號)];
+                }
+            } else {
+                const rec = payload.new;
+                if (rec && rec.編號 !== undefined && rec.編號 !== null) {
+                    const code = String(rec.編號);
+                    const before = allData[code];
+                    // 判斷是否為「這次才剛報到成功」（原本沒有報到時間，這次變成有）
+                    if (rec.報到時間 && (!before || !before.報到時間)) {
+                        newlyCheckedInCode = code;
+                    }
+                    allData[code] = rec;
+                }
+            }
+
+            render(newlyCheckedInCode);
+        })
+        .subscribe();
+
+    function render(highlightCode) {
+        let total = 0, checkedIn = 0;
+        Object.values(allData).forEach(item => {
+            if (!item || item.編號 === undefined) return;
+            total++;
+            if (item.報到時間) checkedIn++;
+        });
+        statsLabel.innerText = `已報到人數：${checkedIn} / ${total}`;
+
+        const checkedInList = Object.values(allData)
+            .filter(item => item && item.編號 !== undefined && item.報到時間)
+            .sort((a, b) => new Date(b.報到時間) - new Date(a.報到時間)); // 新到舊
+
+        listContent.innerHTML = '';
+
+        if (checkedInList.length === 0) {
+            listContent.innerHTML = `<div class="text-center text-slate-400 py-10">目前尚無人報到</div>`;
+            return;
+        }
+
+        checkedInList.forEach(item => {
+            const code = String(item.編號);
+            const div = document.createElement('div');
+            div.className = `flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-xl px-4 py-3 ${code === highlightCode ? 'just-checked-in' : ''}`;
+            div.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <span class="text-sm font-mono text-slate-500 dark:text-slate-400 w-14">${code}</span>
+                    <span class="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100">${item.姓名 || ''}</span>
+                </div>
+                <span class="text-sm md:text-base text-emerald-700 dark:text-emerald-400 font-semibold">${formatTime(new Date(item.報到時間))}</span>
+            `;
+            listContent.appendChild(div);
+        });
+    }
+</script>
+</body>
+</html>
