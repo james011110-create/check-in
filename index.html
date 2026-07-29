@@ -182,7 +182,7 @@
         neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
     };
 
-    // ==================== 載入與即時監聽資料庫 ====================
+    // ==================== 載入資料庫（僅在初始載入時使用） ====================
     async function fetchAllData() {
         const { data, error } = await supabaseClient.from(TABLE_NAME).select('*');
         if (error) {
@@ -200,14 +200,26 @@
         if (isAbsentView) renderAbsentList();
     }
 
-    // 初始載入
+    // 初始載入（整表抓一次，之後靠 Realtime 局部更新，不再整表重抓）
     fetchAllData();
 
-    // 啟用 Supabase Realtime 即時監聽資料表變動
+    // ==================== 【優化】Realtime 監聽：只局部更新有變動的那一筆，不再整表重抓 ====================
     supabaseClient
         .channel('public-db-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, (payload) => {
-            fetchAllData();
+            if (payload.eventType === 'DELETE') {
+                const oldRec = payload.old;
+                if (oldRec && oldRec.編號 !== undefined && oldRec.編號 !== null) {
+                    delete allData[String(oldRec.編號)];
+                }
+            } else {
+                const rec = payload.new;
+                if (rec && rec.編號 !== undefined && rec.編號 !== null) {
+                    allData[String(rec.編號)] = rec;
+                }
+            }
+            updateStatsDisplay();
+            if (isAbsentView) renderAbsentList();
         })
         .subscribe();
 
@@ -447,9 +459,37 @@
         processQueue();
     }
 
-    // ==================== 依編號報到 (Supabase 寫入) ====================
+    // ==================== 【優化】依編號報到：先直接嘗試 UPDATE，只有失敗時才多查一次原因 ====================
     async function checkinByCode(code) {
         try {
+            const nowIso = new Date().toISOString();
+
+            // 直接嘗試「報到時間為空」時才更新，一次網路來回完成大部分情況（首次報到）
+            const { data: updated, error: updateErr } = await supabaseClient
+                .from(TABLE_NAME)
+                .update({ 報到時間: nowIso })
+                .eq('編號', code)
+                .is('報到時間', null)
+                .select();
+
+            if (updateErr) throw updateErr;
+
+            if (updated && updated.length > 0) {
+                // 報到成功
+                const record = updated[0];
+                allData[code] = record;
+                updateStatsDisplay();
+
+                const timeDisplay = formatTime(new Date(nowIso));
+                const name = record.姓名 || '';
+                showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
+
+                const remark = record.備註 || '';
+                if (String(remark).indexOf('資') !== -1) renderSmiley();
+                return;
+            }
+
+            // 沒有任何列被更新 → 可能是「查無此編號」或「已經報到過」，這裡才多查一次確認原因
             const { data: rows, error: fetchErr } = await supabaseClient
                 .from(TABLE_NAME)
                 .select('*')
@@ -463,30 +503,8 @@
 
             const record = rows[0];
             const name = record.姓名 || '';
-
-            if (record.報到時間) {
-                const timeDisplay = formatTime(new Date(record.報到時間));
-                showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
-                return;
-            }
-
-            const nowIso = new Date().toISOString();
-            const { error: updateErr } = await supabaseClient
-                .from(TABLE_NAME)
-                .update({ 報到時間: nowIso })
-                .eq('編號', code)
-                .is('報到時間', null);
-
-            if (updateErr) throw updateErr;
-
-            allData[code].報到時間 = nowIso;
-            updateStatsDisplay();
-
-            const timeDisplay = formatTime(new Date(nowIso));
-            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
-            
-            const remark = record.備註 || '';
-            if (String(remark).indexOf('資') !== -1) renderSmiley();
+            const timeDisplay = record.報到時間 ? formatTime(new Date(record.報到時間)) : '';
+            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
 
         } catch (err) {
             showStatus("❌ 寫入失敗", `無法連線到資料庫，請檢查網路連線後再試一次。\n${err.message}`, 'error');
