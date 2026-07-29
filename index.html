@@ -94,7 +94,7 @@
     <!-- 輸入與按鈕操作區 -->
     <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
         <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-2.5">
-            掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名
+            掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名（支援中文輸入）
         </p>
         <div class="flex gap-2 items-center justify-center">
             <input type="text" id="barcode-input" placeholder="請輸入編號或姓名…" autocomplete="off"
@@ -146,12 +146,11 @@
 <script type="module">
     // ==================== Supabase 初始化 ====================
     const SUPABASE_URL = "https://yomsfevzmpuhthjnxran.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_dXoQYSL8EIEbuKrPx9KVaA_kFEitral"; // <--- 記得填入你的金鑰
+    const SUPABASE_ANON_KEY = "sb_publishable_dXoQYSL8EIEbuKrPx9KVaA_kFEitral";
     
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const TABLE_NAME = "報到名單";
 
-    // 本地快取的完整資料，會透過即時監聽自動保持最新
     let allData = {};
     let isAbsentView = false;
 
@@ -413,59 +412,32 @@
         }
     };
 
-    // ==================== 全網頁鍵盤監聽 ====================
-    let scanBuffer = "";
-    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+    // ==================== 鍵盤與中文輸入處理 ====================
+    window.addEventListener('load', () => {
+        barcodeInput.focus();
+    });
 
-    if (!isTouchDevice) {
-        barcodeInput.setAttribute('readonly', 'readonly');
-    }
-
-    function keepFocus() {
-        if (isTouchDevice) return;
-        if (isAbsentView) return;
+    document.addEventListener('click', (e) => {
         if (isModalOpen) return;
-        if (document.activeElement !== barcodeInput) {
-            barcodeInput.focus();
-        }
-    }
+        if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
+        barcodeInput.focus();
+    });
 
-    if (!isTouchDevice) {
-        window.addEventListener('load', () => barcodeInput.focus());
-        barcodeInput.addEventListener('blur', () => { setTimeout(keepFocus, 50); });
-        setInterval(keepFocus, 300);
-        document.addEventListener('click', (e) => {
-            if (isModalOpen) return;
-            if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
-            setTimeout(keepFocus, 50);
-        });
-    }
-
-    document.addEventListener('keydown', (e) => {
-        if (isAbsentView) return;
+    barcodeInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             handleExecute();
             e.preventDefault();
-            return;
-        }
-        if (isTouchDevice) return;
-        if (e.key === 'Backspace') {
-            scanBuffer = scanBuffer.slice(0, -1);
-            barcodeInput.value = scanBuffer;
-            e.preventDefault();
-            return;
-        }
-        if (e.key.length === 1) {
-            scanBuffer += e.key;
-            barcodeInput.value = scanBuffer;
         }
     });
 
-    if (isTouchDevice) {
-        barcodeInput.addEventListener('input', () => {
-            scanBuffer = barcodeInput.value;
-        });
+    function handleExecute() {
+        const text = barcodeInput.value.trim();
+        if (!text) return;
+        enqueueScan(text);
+        barcodeInput.value = "";
     }
+
+    executeBtn.addEventListener('click', handleExecute);
 
     // ==================== 掃描排隊機制 ====================
     let isProcessing = false;
@@ -491,20 +463,9 @@
         processQueue();
     }
 
-    function handleExecute() {
-        const text = scanBuffer.trim();
-        if (!text) return;
-        enqueueScan(text);
-        scanBuffer = "";
-        barcodeInput.value = "";
-    }
-
-    executeBtn.addEventListener('click', handleExecute);
-
     // ==================== 依編號報到 (Supabase 寫入) ====================
     async function checkinByCode(code) {
         try {
-            // 1. 先查詢該筆資料是否存在及目前的報到狀態
             const { data: rows, error: fetchErr } = await supabaseClient
                 .from(TABLE_NAME)
                 .select('*')
@@ -525,17 +486,15 @@
                 return;
             }
 
-            // 2. 執行更新報到時間
             const nowIso = new Date().toISOString();
             const { error: updateErr } = await supabaseClient
                 .from(TABLE_NAME)
                 .update({ 報到時間: nowIso })
                 .eq('編號', code)
-                .is('報到時間', null); // 確保防重複併發
+                .is('報到時間', null);
 
             if (updateErr) throw updateErr;
 
-            // 更新本地快取
             allData[code].報到時間 = nowIso;
             updateStatsDisplay();
 
@@ -704,7 +663,7 @@
         toolbarFrame.style.display = 'flex';
         statusFrame.style.display = 'flex';
         cameraControlContainer.style.display = 'block';
-        keepFocus();
+        barcodeInput.focus();
     };
 
     function renderAbsentList() {
@@ -714,7 +673,7 @@
             .sort((a, b) => {
                 const numA = parseInt(a.code, 10);
                 const numB = parseInt(b.code, 10);
-                if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+                if (!isNaN(numA) && !isNaN(numB) !== numA && numA !== numB) return numA - numB;
                 return String(a.code).localeCompare(String(b.code));
             });
 
