@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>快速報到系統</title>
+    <title>活動快速報到系統</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- HTML5 QR Code / Barcode 掃描器 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
     <!-- SheetJS，用於產生 Excel 檔案下載 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- Supabase JS Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", sans-serif; }
     </style>
@@ -94,7 +92,7 @@
     <!-- 輸入與按鈕操作區 -->
     <div id="input-frame" class="w-full max-w-xl bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl shadow-slate-200 dark:shadow-none border border-slate-200/80 dark:border-slate-700">
         <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 text-center mb-2.5">
-            掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名（支援中文輸入）
+            掃描機掃描條碼可直接完成報到，或手動輸入編號/姓名
         </p>
         <div class="flex gap-2 items-center justify-center">
             <input type="text" id="barcode-input" placeholder="請輸入編號或姓名…" autocomplete="off"
@@ -144,17 +142,32 @@
     </div>
 
 <script type="module">
-    // ==================== Supabase 初始化 ====================
-    const SUPABASE_URL = "https://yomsfevzmpuhthjnxran.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_dXoQYSL8EIEbuKrPx9KVaA_kFEitral";
-    
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const TABLE_NAME = "報到名單";
+    // ==================== Firebase 初始化 ====================
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+    import {
+        getDatabase, ref, onValue, runTransaction, update
+    } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 
+    const firebaseConfig = {
+        apiKey: "AIzaSyDQKCRVYqVDZaRFCfCFMenq2eqssut1c1I",
+        authDomain: "checkin-961b5.firebaseapp.com",
+        databaseURL: "https://checkin-961b5-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "checkin-961b5",
+        storageBucket: "checkin-961b5.firebasestorage.app",
+        messagingSenderId: "1010761947",
+        appId: "1:1010761947:web:abdf83e6080ea0428b4cfe"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const rootRef = ref(db);
+
+    // 本地快取的完整資料，會透過即時監聽自動保持最新，
+    // 姓名查詢、未報到清單都直接篩選這份快取，不用再另外發請求。
     let allData = {};
     let isAbsentView = false;
 
-    // ==================== 時間格式化（固定使用台北時區） ====================
+    // ==================== 時間格式化（固定使用台北時區，避免裝置時區設定不同造成顯示不一致） ====================
     function formatTime(date) {
         const parts = new Intl.DateTimeFormat('zh-TW', {
             timeZone: 'Asia/Taipei',
@@ -198,39 +211,24 @@
         neutral: { bg: 'bg-white/90 dark:bg-slate-800/90 border-slate-200 dark:border-slate-700', titleColor: 'text-slate-700 dark:text-slate-200' }
     };
 
-    // ==================== 載入與即時監聽資料庫 ====================
-    async function fetchAllData() {
-        const { data, error } = await supabaseClient.from(TABLE_NAME).select('*');
-        if (error) {
-            statsLabel.innerText = "已報到人數：連線失敗";
-            console.error("Supabase 查詢錯誤：", error);
-            return;
-        }
-        allData = {};
-        data.forEach(item => {
-            if (item && item.編號 !== undefined && item.編號 !== null) {
-                allData[String(item.編號)] = item;
-            }
-        });
+    // ==================== 即時監聽整份資料庫 ====================
+    // 資料庫只要有任何異動（不管是這台裝置自己寫入，還是另一台裝置寫入），
+    // 這個 callback 都會立刻自動觸發，不需要輪詢。
+    onValue(rootRef, (snapshot) => {
+        allData = snapshot.val() || {};
         updateStatsDisplay();
-        if (isAbsentView) renderAbsentList();
-    }
-
-    // 初始載入
-    fetchAllData();
-
-    // 啟用 Supabase Realtime 即時監聽資料表變動
-    supabaseClient
-        .channel('public-db-changes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: TABLE_NAME }, (payload) => {
-            fetchAllData();
-        })
-        .subscribe();
+        if (isAbsentView) {
+            renderAbsentList();
+        }
+    }, (err) => {
+        statsLabel.innerText = "已報到人數：連線失敗";
+        console.error("Firebase 監聽錯誤：", err);
+    });
 
     function updateStatsDisplay() {
         let total = 0, checkedIn = 0;
         Object.values(allData).forEach(item => {
-            if (!item || item.編號 === undefined) return;
+            if (!item || !item.編號) return;
             total++;
             if (item.報到時間) checkedIn++;
         });
@@ -238,6 +236,9 @@
     }
 
     // ==================== 管理設定（清除紀錄 / 重新匯入） ====================
+    // 只有網址帶上 ?admin=1 才會顯示設定齒輪，避免一般報到人員或訪客誤觸。
+    // 這不是真正的登入驗證，只是降低「不小心點到」的風險，
+    // 正式活動時，只把「不帶 admin 參數」的一般連結分享出去，帶 admin 的網址自己留著用。
     const isAdminMode = new URLSearchParams(window.location.search).get('admin') === '1';
     const ADMIN_PASSWORD = "29770188910812";
     let isModalOpen = false;
@@ -261,6 +262,7 @@
         adminSettingsBtn.style.display = 'flex';
     }
 
+    // 點齒輪先跳出密碼輸入層，驗證通過才會顯示真正的管理面板
     adminSettingsBtn.onclick = () => {
         isModalOpen = true;
         passwordInput.value = '';
@@ -300,6 +302,7 @@
         adminModal.style.display = 'none';
     };
 
+    // 下載目前名冊為 Excel 檔（檔名自動帶當天日期）
     function getDateStrForFilename() {
         const parts = new Intl.DateTimeFormat('zh-TW', {
             timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
@@ -310,7 +313,7 @@
 
     adminDownloadBtn.onclick = () => {
         const sorted = Object.entries(allData)
-            .filter(([code, item]) => item && item.編號 !== undefined)
+            .filter(([code, item]) => item && item.編號)
             .sort((a, b) => {
                 const numA = parseInt(a[1].編號 || a[0], 10);
                 const numB = parseInt(b[1].編號 || b[0], 10);
@@ -342,6 +345,7 @@
         adminMessage.innerText = `已下載，共 ${sorted.length} 筆資料。`;
     };
 
+    // 只清除「報到時間」欄位，姓名/編號/備註都保留，適合測試階段重複重置用
     adminClearCheckinBtn.onclick = async () => {
         const targets = Object.entries(allData).filter(([code, item]) => item && item.報到時間);
         if (targets.length === 0) {
@@ -353,19 +357,18 @@
 
         adminMessage.innerText = '處理中…';
         try {
-            const { error } = await supabaseClient
-                .from(TABLE_NAME)
-                .update({ 報到時間: null })
-                .not('報到時間', 'is', null);
-
-            if (error) throw error;
-            await fetchAllData();
-            adminMessage.innerText = `已清除報到紀錄。`;
+            const updates = {};
+            targets.forEach(([code]) => {
+                updates[`${code}/報到時間`] = null;
+            });
+            await update(rootRef, updates);
+            adminMessage.innerText = `已清除 ${targets.length} 筆報到紀錄。`;
         } catch (err) {
             adminMessage.innerText = `清除失敗：${err.message}`;
         }
     };
 
+    // 上傳 JSON，整批覆蓋名單（新檔案沒有的舊編號會一併移除，等同「先清空再匯入」的效果）
     adminReimportBtn.onclick = () => {
         adminFileInput.value = '';
         adminFileInput.click();
@@ -390,56 +393,100 @@
         }
 
         const newCount = Object.keys(newData).length;
-        const ok = confirm(`即將匯入 ${newCount} 筆資料到 Supabase，確定要繼續嗎？`);
+        const ok = confirm(`即將用這份檔案（共 ${newCount} 筆）覆蓋整個報到名單，現有資料（包含所有報到紀錄）將會被取代！\n此動作無法復原，確定要繼續嗎？`);
         if (!ok) return;
 
         adminMessage.innerText = '匯入中…';
         try {
-            const rowsToUpsert = Object.entries(newData).map(([code, item]) => ({
-                編號: item.編號 !== undefined ? item.編號 : code,
-                姓名: item.姓名 || '',
-                報到時間: item.報到時間 || null,
-                備註: item.備註 || null
-            }));
-
-            const { error } = await supabaseClient.from(TABLE_NAME).upsert(rowsToUpsert, { onConflict: '編號' });
-            if (error) throw error;
-
-            await fetchAllData();
-            adminMessage.innerText = `已成功匯入資料。`;
+            const updates = {};
+            Object.entries(newData).forEach(([code, item]) => {
+                updates[code] = item;
+            });
+            Object.keys(allData).forEach((code) => {
+                if (!(code in newData)) {
+                    updates[code] = null;
+                }
+            });
+            await update(rootRef, updates);
+            adminMessage.innerText = `已成功匯入 ${newCount} 筆資料。`;
         } catch (err) {
             adminMessage.innerText = `匯入失敗：${err.message}`;
         }
     };
 
-    // ==================== 鍵盤與中文輸入處理 ====================
-    window.addEventListener('load', () => {
-        barcodeInput.focus();
-    });
+    // ==================== 全網頁鍵盤監聽（掃描槍 = 快速鍵盤輸入） ====================
+    let scanBuffer = "";
 
-    document.addEventListener('click', (e) => {
-        if (isModalOpen) return;
-        if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
-        barcodeInput.focus();
-    });
+    // 偵測是否為觸控裝置（例如 iPhone / iPad）。
+    // 只有非觸控裝置（筆電，使用實體鍵盤/掃描槍）才設為 readonly，
+    // 因為 iOS 對 readonly 欄位不會跳出螢幕鍵盤；
+    // 觸控裝置維持一般可編輯欄位，才能正常手動打字。
+    const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
 
-    barcodeInput.addEventListener('keydown', (e) => {
+    if (!isTouchDevice) {
+        barcodeInput.setAttribute('readonly', 'readonly');
+    }
+
+    // ==================== 自動維持輸入框焦點 ====================
+    // 觸控裝置維持「使用者點一下才聚焦、才彈出螢幕鍵盤」的原生行為；
+    // 只有非觸控裝置（例如筆電，操作方式是滑鼠 + 實體鍵盤/掃描槍）才啟用自動搶焦點機制。
+    function keepFocus() {
+        if (isTouchDevice) return; // 觸控裝置不強制搶焦點，避免螢幕鍵盤無法正常彈出
+        if (isAbsentView) return; // 在未報到清單畫面時不搶焦點，避免影響瀏覽
+        if (isModalOpen) return; // 密碼框或管理面板開啟中，不搶焦點，避免干擾輸入
+        if (document.activeElement !== barcodeInput) {
+            barcodeInput.focus();
+        }
+    }
+
+    if (!isTouchDevice) {
+        window.addEventListener('load', () => barcodeInput.focus());
+        barcodeInput.addEventListener('blur', () => {
+            setTimeout(keepFocus, 50);
+        });
+        setInterval(keepFocus, 300);
+        document.addEventListener('click', (e) => {
+            if (isModalOpen) return;
+            if (e.target.closest('button') || e.target.closest('#candidates-list')) return;
+            setTimeout(keepFocus, 50);
+        });
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (isAbsentView) return; // 未報到清單畫面時，暫不處理輸入，避免誤觸報到
+
         if (e.key === 'Enter') {
             handleExecute();
             e.preventDefault();
+            return;
+        }
+
+        // 觸控裝置（iPhone/iPad）交給下面的原生 input 事件處理文字同步，
+        // 這裡不再手動攔截字元／退格鍵，避免跟螢幕鍵盤的原生輸入重複或衝突。
+        if (isTouchDevice) return;
+
+        if (e.key === 'Backspace') {
+            scanBuffer = scanBuffer.slice(0, -1);
+            barcodeInput.value = scanBuffer;
+            e.preventDefault();
+            return;
+        }
+
+        if (e.key.length === 1) {
+            scanBuffer += e.key;
+            barcodeInput.value = scanBuffer;
         }
     });
 
-    function handleExecute() {
-        const text = barcodeInput.value.trim();
-        if (!text) return;
-        enqueueScan(text);
-        barcodeInput.value = "";
+    if (isTouchDevice) {
+        barcodeInput.addEventListener('input', () => {
+            scanBuffer = barcodeInput.value;
+        });
     }
 
-    executeBtn.addEventListener('click', handleExecute);
-
     // ==================== 掃描排隊機制 ====================
+    // 不管掃描/輸入速度多快，都先進隊列排隊，確保一次只處理一筆，
+    // 處理完才自動接著處理下一筆，避免同一分頁內多筆請求同時送出造成混亂。
     let isProcessing = false;
     const scanQueue = [];
 
@@ -463,60 +510,63 @@
         processQueue();
     }
 
-    // ==================== 依編號報到 (Supabase 寫入) ====================
+    function handleExecute() {
+        const text = scanBuffer.trim();
+        if (!text) return;
+
+        enqueueScan(text);
+
+        scanBuffer = "";
+        barcodeInput.value = "";
+    }
+
+    executeBtn.addEventListener('click', handleExecute);
+
+    // ==================== 依編號報到（Firebase Transaction，避免多裝置同時寫入衝突） ====================
     async function checkinByCode(code) {
+        const nodeRef = ref(db, code);
+        let committed = false;
+        let data = null;
+
         try {
-            const { data: rows, error: fetchErr } = await supabaseClient
-                .from(TABLE_NAME)
-                .select('*')
-                .eq('編號', code)
-                .limit(1);
-
-            if (fetchErr || !rows || rows.length === 0) {
-                showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
-                return;
-            }
-
-            const record = rows[0];
-            const name = record.姓名 || '';
-
-            if (record.報到時間) {
-                const timeDisplay = formatTime(new Date(record.報到時間));
-                showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
-                return;
-            }
-
-            const nowIso = new Date().toISOString();
-            const { error: updateErr } = await supabaseClient
-                .from(TABLE_NAME)
-                .update({ 報到時間: nowIso })
-                .eq('編號', code)
-                .is('報到時間', null);
-
-            if (updateErr) throw updateErr;
-
-            allData[code].報到時間 = nowIso;
-            updateStatsDisplay();
-
-            const timeDisplay = formatTime(new Date(nowIso));
-            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
-            
-            const remark = record.備註 || '';
-            if (String(remark).indexOf('資') !== -1) renderSmiley();
-
+            const txResult = await runTransaction(nodeRef, (currentData) => {
+                if (currentData === null) return; // 查無此編號，中止交易
+                if (currentData.報到時間) return; // 已經報到過，中止交易（不覆寫）
+                currentData.報到時間 = new Date().toISOString();
+                return currentData;
+            });
+            committed = txResult.committed;
+            data = txResult.snapshot.val();
         } catch (err) {
             showStatus("❌ 寫入失敗", `無法連線到資料庫，請檢查網路連線後再試一次。\n${err.message}`, 'error');
+            return;
+        }
+
+        if (data === null) {
+            showStatus("❌ 查無此編號", `代號「${code}」不在名單中，請重新確認！`, 'error');
+            return;
+        }
+
+        const name = data.姓名 || '';
+        const timeDisplay = data.報到時間 ? formatTime(new Date(data.報到時間)) : '';
+
+        if (committed) {
+            showStatus("✅ 報到成功！", `編 號： ${code}\n\n姓 名： ${name}\n\n報到時間： ${timeDisplay}`, 'success');
+            const remark = data.備註 || '';
+            if (String(remark).indexOf('資') !== -1) renderSmiley();
+        } else {
+            showStatus("⚠️ 注意：此貴賓已重複報到！", `編 號： ${code}\n\n姓 名： ${name}\n\n原報到時間： ${timeDisplay}`, 'duplicate');
         }
     }
 
-    // ==================== 姓名模糊查詢 ====================
+    // ==================== 姓名模糊查詢（直接篩選本地即時快取，不用另外發請求） ====================
     async function searchByName(keyword) {
         const matches = [];
         Object.entries(allData).forEach(([code, item]) => {
             if (!item || !item.姓名) return;
             if (String(item.姓名).indexOf(keyword) !== -1) {
                 matches.push({
-                    code: item.編號 !== undefined ? item.編號 : code,
+                    code: item.編號 || code,
                     name: item.姓名,
                     checked_in: !!item.報到時間,
                     time: item.報到時間 ? formatTime(new Date(item.報到時間)) : null
@@ -580,7 +630,7 @@
         `;
     }
 
-    // ==================== 相機掃描 ====================
+    // ==================== 相機掃描（CODE 128 一維條碼） ====================
     let html5QrCode = null;
     let isCameraRunning = false;
 
@@ -663,17 +713,18 @@
         toolbarFrame.style.display = 'flex';
         statusFrame.style.display = 'flex';
         cameraControlContainer.style.display = 'block';
-        barcodeInput.focus();
+        keepFocus();
     };
 
+    // 直接篩選本地即時快取，不用另外發請求；資料庫有異動時（見上方 onValue）也會自動重新渲染。
     function renderAbsentList() {
         const absentList = Object.entries(allData)
-            .filter(([code, item]) => item && item.編號 !== undefined && !item.報到時間)
-            .map(([code, item]) => ({ code: item.編號 !== undefined ? item.編號 : code, name: item.姓名 || '' }))
+            .filter(([code, item]) => item && item.編號 && !item.報到時間)
+            .map(([code, item]) => ({ code: item.編號 || code, name: item.姓名 || '' }))
             .sort((a, b) => {
                 const numA = parseInt(a.code, 10);
                 const numB = parseInt(b.code, 10);
-                if (!isNaN(numA) && !isNaN(numB) !== numA && numA !== numB) return numA - numB;
+                if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
                 return String(a.code).localeCompare(String(b.code));
             });
 
